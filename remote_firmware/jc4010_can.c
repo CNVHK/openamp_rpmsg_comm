@@ -51,6 +51,11 @@ void jc4010_build_enable(uint8_t motor_id, Jc4010CanFrame *frame)
     jc4010_build_cmd(motor_id, 0x2B, 0x00A2, 1, frame);
 }
 
+void jc4010_build_clear_fault(uint8_t motor_id, Jc4010CanFrame *frame)
+{
+    jc4010_build_cmd(motor_id, 0x2B, 0x00A5, 1, frame);
+}
+
 void jc4010_build_set_mode(uint8_t motor_id, uint16_t mode, Jc4010CanFrame *frame)
 {
     jc4010_build_cmd(motor_id, 0x2B, 0x0060, mode, frame);
@@ -95,4 +100,3 @@ int jc4010_parse_status(uint32_t can_id, const uint8_t data[8],
     target->current_a = (float)raw_cur / 100.0f;
     return 1;
 }
-

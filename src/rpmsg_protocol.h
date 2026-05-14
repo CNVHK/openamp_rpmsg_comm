@@ -16,7 +16,9 @@ typedef enum {
     CMD_CAN_ENABLE = 10,
     CMD_CAN_ZERO_POSITION = 11,
     CMD_CAN_PVT = 12,
-    CMD_CAN_SAFE_STOP = 13
+    CMD_CAN_SAFE_STOP = 13,
+    CMD_CAN_SET_MODE = 14,
+    CMD_CAN_INIT_MOTOR = 15
 } CommandType;
 
 typedef struct {

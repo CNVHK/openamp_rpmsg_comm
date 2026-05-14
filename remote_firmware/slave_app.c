@@ -20,6 +20,7 @@ typedef struct {
     int8_t motor_left;
     int8_t motor_right;
     uint8_t heartbeat_ok;
+    int8_t last_can_ret;
     uint32_t bad_frame_count;
 } SlaveControlState;
 
@@ -40,7 +41,9 @@ static void apply_motor_output(int8_t left, int8_t right)
 
 static int send_jc4010_frame(const Jc4010CanFrame *frame)
 {
-    return phytium_can_send(frame);
+    int ret = phytium_can_send(frame);
+    g_state.last_can_ret = (int8_t)ret;
+    return ret;
 }
 
 static int32_t read_be_i32(const uint8_t *p)
@@ -60,6 +63,20 @@ static void handle_can_enable(uint8_t motor_id)
 {
     Jc4010CanFrame can_frame;
     jc4010_build_enable(motor_id, &can_frame);
+    send_jc4010_frame(&can_frame);
+}
+
+static void handle_can_clear_fault(uint8_t motor_id)
+{
+    Jc4010CanFrame can_frame;
+    jc4010_build_clear_fault(motor_id, &can_frame);
+    send_jc4010_frame(&can_frame);
+}
+
+static void handle_can_set_mode(uint8_t motor_id, uint16_t mode)
+{
+    Jc4010CanFrame can_frame;
+    jc4010_build_set_mode(motor_id, mode, &can_frame);
     send_jc4010_frame(&can_frame);
 }
 
@@ -94,12 +111,25 @@ static void handle_can_pvt(const uint8_t *payload, uint8_t length)
     send_jc4010_frame(&can_frame);
 }
 
+static void handle_can_init_motor(uint8_t motor_id)
+{
+    /*
+     * Same command order as G431_CAN/Core/Src/main.c:
+     * 0x00A5=1, mode 0x0060=2, zero 0x00A7=1, enable 0x00A2=1.
+     */
+    handle_can_clear_fault(motor_id);
+    handle_can_set_mode(motor_id, 2);
+    handle_can_zero(motor_id);
+    handle_can_enable(motor_id);
+}
+
 static size_t build_ack(uint8_t seq, uint8_t *out, size_t out_size)
 {
-    uint8_t payload[3];
+    uint8_t payload[4];
     payload[0] = (uint8_t)g_state.motor_left;
     payload[1] = (uint8_t)g_state.motor_right;
     payload[2] = g_state.heartbeat_ok;
+    payload[3] = (uint8_t)g_state.last_can_ret;
     return rpmsg_encode(CMD_HEARTBEAT, seq, payload, sizeof(payload), out, out_size);
 }
 
@@ -127,6 +157,16 @@ size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply,
     case CMD_CAN_ENABLE:
         if (frame.length >= 1) {
             handle_can_enable(frame.payload[0]);
+        }
+        return build_ack(frame.seq, reply, reply_size);
+    case CMD_CAN_SET_MODE:
+        if (frame.length >= 3) {
+            handle_can_set_mode(frame.payload[0], read_be_u16(&frame.payload[1]));
+        }
+        return build_ack(frame.seq, reply, reply_size);
+    case CMD_CAN_INIT_MOTOR:
+        if (frame.length >= 1) {
+            handle_can_init_motor(frame.payload[0]);
         }
         return build_ack(frame.seq, reply, reply_size);
     case CMD_CAN_ZERO_POSITION:

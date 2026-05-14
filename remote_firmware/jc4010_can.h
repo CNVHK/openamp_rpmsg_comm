@@ -33,6 +33,7 @@ void jc4010_build_pvt(uint8_t motor_id, int32_t position_x100_deg,
                       uint16_t speed_rpm, uint8_t torque_percent,
                       Jc4010CanFrame *frame);
 void jc4010_build_enable(uint8_t motor_id, Jc4010CanFrame *frame);
+void jc4010_build_clear_fault(uint8_t motor_id, Jc4010CanFrame *frame);
 void jc4010_build_set_mode(uint8_t motor_id, uint16_t mode, Jc4010CanFrame *frame);
 void jc4010_build_zero_position(uint8_t motor_id, Jc4010CanFrame *frame);
 void jc4010_build_safe_stop(uint8_t motor_id, Jc4010CanFrame *frame);
@@ -40,4 +41,3 @@ int jc4010_parse_status(uint32_t can_id, const uint8_t data[8],
                         Jc4010MotorState *motor1, Jc4010MotorState *motor2);
 
 #endif
-

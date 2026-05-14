@@ -40,10 +40,13 @@ static void usage(const char *prog)
     printf("  %s <rpmsg_dev> heartbeat\n", prog);
     printf("  %s <rpmsg_dev> enable <motor_id>\n", prog);
     printf("  %s <rpmsg_dev> zero <motor_id>\n", prog);
+    printf("  %s <rpmsg_dev> mode <motor_id> <mode>\n", prog);
+    printf("  %s <rpmsg_dev> init <motor_id>\n", prog);
     printf("  %s <rpmsg_dev> pvt <motor_id> <pos_x100_deg> <speed_rpm> <torque_percent>\n", prog);
     printf("  %s <rpmsg_dev> stop [motor_id]\n", prog);
     printf("\nExamples:\n");
     printf("  %s /dev/rpmsg0 heartbeat\n", prog);
+    printf("  %s /dev/rpmsg0 init 1\n", prog);
     printf("  %s /dev/rpmsg0 enable 1\n", prog);
     printf("  %s /dev/rpmsg0 pvt 1 1000 100 20\n", prog);
     printf("  %s /dev/rpmsg0 stop 1\n", prog);
@@ -72,6 +75,23 @@ static int build_command(int argc, char **argv, uint8_t *type, uint8_t *payload,
     if (strcmp(cmd, "zero") == 0) {
         if (argc < 4) return -1;
         *type = CMD_CAN_ZERO_POSITION;
+        payload[0] = (uint8_t)strtoul(argv[3], NULL, 0);
+        *payload_len = 1;
+        return 0;
+    }
+
+    if (strcmp(cmd, "mode") == 0) {
+        if (argc < 5) return -1;
+        *type = CMD_CAN_SET_MODE;
+        payload[0] = (uint8_t)strtoul(argv[3], NULL, 0);
+        put_be_u16(&payload[1], (uint16_t)strtoul(argv[4], NULL, 0));
+        *payload_len = 3;
+        return 0;
+    }
+
+    if (strcmp(cmd, "init") == 0) {
+        if (argc < 4) return -1;
+        *type = CMD_CAN_INIT_MOTOR;
         payload[0] = (uint8_t)strtoul(argv[3], NULL, 0);
         *payload_len = 1;
         return 0;
@@ -166,10 +186,14 @@ int main(int argc, char **argv)
 
     printf("ack type=%u seq=%u payload_len=%u\n", ack.type, ack.seq, ack.length);
     if (ack.length >= 3) {
-        printf("remote state: motor_left=%d motor_right=%d heartbeat_ok=%u\n",
+        printf("remote state: motor_left=%d motor_right=%d heartbeat_ok=%u",
                (int8_t)ack.payload[0],
                (int8_t)ack.payload[1],
                ack.payload[2]);
+        if (ack.length >= 4) {
+            printf(" last_can_ret=%d", (int8_t)ack.payload[3]);
+        }
+        printf("\n");
     }
 
     close(fd);
