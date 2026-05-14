@@ -162,7 +162,7 @@ int main(int argc, char **argv)
 
     printf("command type=%u sent to %s, len=%zu\n", type, dev, size);
 
-    int ready = wait_readable(fd, 1500);
+    int ready = wait_readable(fd, 5000);
     if (ready < 0) {
         perror("select");
         close(fd);

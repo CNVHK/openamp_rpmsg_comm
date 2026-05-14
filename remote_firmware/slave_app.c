@@ -13,6 +13,7 @@
 #include "../src/rpmsg_protocol.h"
 #include "jc4010_can.h"
 #include "phytium_can_port.h"
+#include "fsleep.h"
 #include <stdint.h>
 #include <string.h>
 
@@ -118,9 +119,13 @@ static void handle_can_init_motor(uint8_t motor_id)
      * 0x00A5=1, mode 0x0060=2, zero 0x00A7=1, enable 0x00A2=1.
      */
     handle_can_clear_fault(motor_id);
+    fsleep_millisec(2000);
     handle_can_set_mode(motor_id, 2);
+    fsleep_millisec(10);
     handle_can_zero(motor_id);
+    fsleep_millisec(10);
     handle_can_enable(motor_id);
+    fsleep_millisec(10);
 }
 
 static size_t build_ack(uint8_t seq, uint8_t *out, size_t out_size)
