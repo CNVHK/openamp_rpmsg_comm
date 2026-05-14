@@ -20,6 +20,23 @@ static void test_pvt_frame(void)
     assert(frame.data[7] == 50);
 }
 
+static void test_known_linux_cansend_frame(void)
+{
+    Jc4010CanFrame frame;
+    jc4010_build_pvt(1, 500, 50, 10, &frame);
+
+    assert(frame.id == 0x601);
+    assert(frame.dlc == 8);
+    assert(frame.data[0] == 0x25);
+    assert(frame.data[1] == 0x00);
+    assert(frame.data[2] == 0x00);
+    assert(frame.data[3] == 0x01);
+    assert(frame.data[4] == 0xF4);
+    assert(frame.data[5] == 0x00);
+    assert(frame.data[6] == 0x32);
+    assert(frame.data[7] == 0x0A);
+}
+
 static void test_status_parse(void)
 {
     Jc4010MotorState m1 = {0};
@@ -35,8 +52,8 @@ static void test_status_parse(void)
 int main(void)
 {
     test_pvt_frame();
+    test_known_linux_cansend_frame();
     test_status_parse();
     printf("jc4010 can protocol tests passed\n");
     return 0;
 }
-

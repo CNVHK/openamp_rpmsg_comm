@@ -130,12 +130,33 @@ static void handle_can_init_motor(uint8_t motor_id)
 
 static size_t build_ack(uint8_t seq, uint8_t *out, size_t out_size)
 {
-    uint8_t payload[4];
+    const PhytiumCanDebugState *can_dbg = phytium_can_get_debug_state();
+    uint8_t payload[32];
+    memset(payload, 0, sizeof(payload));
+
     payload[0] = (uint8_t)g_state.motor_left;
     payload[1] = (uint8_t)g_state.motor_right;
     payload[2] = g_state.heartbeat_ok;
     payload[3] = (uint8_t)g_state.last_can_ret;
-    return rpmsg_encode(CMD_HEARTBEAT, seq, payload, sizeof(payload), out, out_size);
+    payload[4] = (uint8_t)can_dbg->init_ret;
+    payload[5] = (uint8_t)can_dbg->last_send_ret;
+    payload[6] = (uint8_t)can_dbg->can_id;
+    payload[7] = (uint8_t)(can_dbg->baudrate >> 24);
+    payload[8] = (uint8_t)(can_dbg->baudrate >> 16);
+    payload[9] = (uint8_t)(can_dbg->baudrate >> 8);
+    payload[10] = (uint8_t)(can_dbg->baudrate & 0xff);
+    payload[11] = (uint8_t)(can_dbg->send_count >> 24);
+    payload[12] = (uint8_t)(can_dbg->send_count >> 16);
+    payload[13] = (uint8_t)(can_dbg->send_count >> 8);
+    payload[14] = (uint8_t)(can_dbg->send_count & 0xff);
+    payload[15] = (uint8_t)(can_dbg->last_frame_id >> 8);
+    payload[16] = (uint8_t)(can_dbg->last_frame_id & 0xff);
+    payload[17] = can_dbg->last_frame_dlc;
+    for (int i = 0; i < 8; ++i) {
+        payload[18 + i] = can_dbg->last_frame_data[i];
+    }
+
+    return rpmsg_encode(CMD_HEARTBEAT, seq, payload, 26, out, out_size);
 }
 
 size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply, size_t reply_size)

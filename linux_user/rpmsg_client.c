@@ -8,7 +8,7 @@
 #include <sys/select.h>
 #include <unistd.h>
 
-#define RPMSG_CLIENT_VERSION "0.3.0-can-jc4010"
+#define RPMSG_CLIENT_VERSION "0.4.0-can-debug"
 
 static int wait_readable(int fd, int timeout_ms)
 {
@@ -34,6 +34,14 @@ static void put_be_u16(uint8_t *p, uint16_t value)
 {
     p[0] = (uint8_t)(value >> 8);
     p[1] = (uint8_t)(value & 0xff);
+}
+
+static uint32_t read_be_u32(const uint8_t *p)
+{
+    return ((uint32_t)p[0] << 24) |
+           ((uint32_t)p[1] << 16) |
+           ((uint32_t)p[2] << 8) |
+           (uint32_t)p[3];
 }
 
 static void usage(const char *prog)
@@ -198,6 +206,31 @@ int main(int argc, char **argv)
             printf(" last_can_ret=%d", (int8_t)ack.payload[3]);
         }
         printf("\n");
+    }
+
+    if (ack.length >= 26) {
+        uint32_t baudrate = read_be_u32(&ack.payload[7]);
+        uint32_t send_count = read_be_u32(&ack.payload[11]);
+        uint16_t frame_id = (uint16_t)(((uint16_t)ack.payload[15] << 8) | ack.payload[16]);
+
+        printf("can debug: init_ret=%d send_ret=%d can_id=%u baudrate=%u send_count=%u\n",
+               (int8_t)ack.payload[4],
+               (int8_t)ack.payload[5],
+               ack.payload[6],
+               baudrate,
+               send_count);
+
+        printf("last can frame: id=0x%03x dlc=%u data=%02X %02X %02X %02X %02X %02X %02X %02X\n",
+               frame_id,
+               ack.payload[17],
+               ack.payload[18],
+               ack.payload[19],
+               ack.payload[20],
+               ack.payload[21],
+               ack.payload[22],
+               ack.payload[23],
+               ack.payload[24],
+               ack.payload[25]);
     }
 
     close(fd);
