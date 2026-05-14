@@ -8,6 +8,8 @@
 #include <sys/select.h>
 #include <unistd.h>
 
+#define RPMSG_CLIENT_VERSION "0.3.0-can-jc4010"
+
 static int wait_readable(int fd, int timeout_ms)
 {
     fd_set rfds;
@@ -131,6 +133,8 @@ int main(int argc, char **argv)
     uint8_t tx_frame[96];
     uint8_t rx_frame[96];
     RpmsgFrame ack;
+
+    printf("rpmsg_client version: %s\n", RPMSG_CLIENT_VERSION);
 
     if (build_command(argc, argv, &type, payload, &payload_len) != 0) {
         usage(argv[0]);
