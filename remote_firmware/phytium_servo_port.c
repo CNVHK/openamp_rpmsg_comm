@@ -90,7 +90,6 @@ int phytium_servo_init(void)
 
     db_cfg.db_out_mode = FPWM_DB_OUT_MODE_BYPASS;
 
-    pwm_cfg.tim_ctrl_enable = TRUE;
     pwm_cfg.tim_ctrl_mode = 0;
     pwm_cfg.tim_ctrl_div = 50;
     pwm_cfg.pwm_period = SERVO_PERIOD_US;
