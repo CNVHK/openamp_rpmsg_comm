@@ -24,10 +24,10 @@ typedef struct {
 } ServoPwmMap;
 
 static const ServoPwmMap g_servo_map[PHYTIUM_SERVO_NUM] = {
+    {1, 0}, // 舵机0 -> PWM2_OUT -> AG57 -> 40Pin Pin32
+    {2, 1}, // 舵机1 -> PWM5_OUT -> C39  -> 40Pin Pin33
     {0, 0},
     {0, 1},
-    {1, 0},
-    {1, 1},
 };
 
 static FPwmCtrl g_pwm_ctrl[2];
