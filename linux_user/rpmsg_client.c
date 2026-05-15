@@ -262,11 +262,13 @@ int main(int argc, char **argv)
         uint32_t rx_err = reg_err_cnt & 0x1ff;
         uint32_t tx_fifo = (reg_fifo_cnt >> 16) & 0x7f;
         uint32_t rx_fifo = reg_fifo_cnt & 0x7f;
+        uint32_t ctrl_enable = reg_ctrl & 0x1;
+        uint32_t xfer_en_bit = reg_xfer_en & 0x1;
 
         printf("can regs: CTRL=0x%08X INTR=0x%08X XFER_STS=0x%08X ERR_CNT=0x%08X FIFO_CNT=0x%08X XFER_EN=0x%08X\n",
                reg_ctrl, reg_intr, reg_xfer_sts, reg_err_cnt, reg_fifo_cnt, reg_xfer_en);
-        printf("can decoded: tx_err=%u rx_err=%u tx_fifo=%u rx_fifo=%u transfer_enable=%u\n",
-               tx_err, rx_err, tx_fifo, rx_fifo, reg_xfer_en & 0x1);
+        printf("can decoded: tx_err=%u rx_err=%u tx_fifo=%u rx_fifo=%u ctrl_enable=%u xfer_en_bit=%u\n",
+               tx_err, rx_err, tx_fifo, rx_fifo, ctrl_enable, xfer_en_bit);
     }
 
     close(fd);

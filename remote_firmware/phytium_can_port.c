@@ -101,8 +101,19 @@ int phytium_can_init(void)
     memset(&arb_segment_config, 0, sizeof(arb_segment_config));
 
     arb_segment_config.baudrate = PHYTIUM_CAN_BAUDRATE;
-    arb_segment_config.auto_calc = TRUE;
+    /*
+     * Match the Linux SocketCAN timing that has already moved the motor:
+     * bitrate 1000000, sample-point 0.750, brp 10, prop 7,
+     * phase_seg1 7, phase_seg2 5, sjw 2, CAN clock 200MHz.
+     */
+    arb_segment_config.auto_calc = FALSE;
     arb_segment_config.segment = FCAN_ARB_SEGMENT;
+    arb_segment_config.sample_point = 750;
+    arb_segment_config.prop_seg = 7;
+    arb_segment_config.phase_seg1 = 7;
+    arb_segment_config.phase_seg2 = 5;
+    arb_segment_config.sjw = 2;
+    arb_segment_config.brp = 10;
 
     ret = FCanBaudrateSet(&g_can, &arb_segment_config);
     if (ret != FCAN_SUCCESS) {
