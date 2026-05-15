@@ -8,7 +8,7 @@
 #include <sys/select.h>
 #include <unistd.h>
 
-#define RPMSG_CLIENT_VERSION "0.6.0-can-reg-debug"
+#define RPMSG_CLIENT_VERSION "0.7.0-servo4"
 
 static int wait_readable(int fd, int timeout_ms)
 {
@@ -54,6 +54,8 @@ static void usage(const char *prog)
     printf("  %s <rpmsg_dev> init <motor_id>\n", prog);
     printf("  %s <rpmsg_dev> g431init\n", prog);
     printf("  %s <rpmsg_dev> g431demo <0|1>\n", prog);
+    printf("  %s <rpmsg_dev> servo <s0_deg> <s1_deg> <s2_deg> <s3_deg>\n", prog);
+    printf("  %s <rpmsg_dev> servocenter\n", prog);
     printf("  %s <rpmsg_dev> pvt <motor_id> <pos_x100_deg> <speed_rpm> <torque_percent>\n", prog);
     printf("  %s <rpmsg_dev> stop [motor_id]\n", prog);
     printf("\nExamples:\n");
@@ -62,6 +64,8 @@ static void usage(const char *prog)
     printf("  %s /dev/rpmsg0 g431init\n", prog);
     printf("  %s /dev/rpmsg0 g431demo 0\n", prog);
     printf("  %s /dev/rpmsg0 g431demo 1\n", prog);
+    printf("  %s /dev/rpmsg0 servo 90 90 90 90\n", prog);
+    printf("  %s /dev/rpmsg0 servocenter\n", prog);
     printf("  %s /dev/rpmsg0 enable 1\n", prog);
     printf("  %s /dev/rpmsg0 pvt 1 1000 100 20\n", prog);
     printf("  %s /dev/rpmsg0 stop 1\n", prog);
@@ -122,6 +126,24 @@ static int build_command(int argc, char **argv, uint8_t *type, uint8_t *payload,
         *type = CMD_CAN_G431_DEMO;
         payload[0] = argc >= 4 ? (uint8_t)strtoul(argv[3], NULL, 0) : 0;
         *payload_len = 1;
+        return 0;
+    }
+
+    if (strcmp(cmd, "servo") == 0) {
+        if (argc < 7) return -1;
+        *type = CMD_SERVO_SET4;
+        for (int i = 0; i < 4; ++i) {
+            unsigned long angle = strtoul(argv[3 + i], NULL, 0);
+            if (angle > 180) angle = 180;
+            put_be_u16(&payload[i * 2], (uint16_t)angle);
+        }
+        *payload_len = 8;
+        return 0;
+    }
+
+    if (strcmp(cmd, "servocenter") == 0) {
+        *type = CMD_SERVO_CENTER;
+        *payload_len = 0;
         return 0;
     }
 
@@ -269,6 +291,22 @@ int main(int argc, char **argv)
                reg_ctrl, reg_intr, reg_xfer_sts, reg_err_cnt, reg_fifo_cnt, reg_xfer_en);
         printf("can decoded: tx_err=%u rx_err=%u tx_fifo=%u rx_fifo=%u ctrl_enable=%u xfer_en_bit=%u\n",
                tx_err, rx_err, tx_fifo, rx_fifo, ctrl_enable, xfer_en_bit);
+    }
+
+    if (ack.length >= 60) {
+        uint16_t servo_angle[4];
+        for (int i = 0; i < 4; ++i) {
+            servo_angle[i] = (uint16_t)(((uint16_t)ack.payload[52 + i * 2] << 8) |
+                                        ack.payload[53 + i * 2]);
+        }
+
+        printf("servo debug: init_ret=%d last_ret=%d angles=%u,%u,%u,%u\n",
+               (int8_t)ack.payload[50],
+               (int8_t)ack.payload[51],
+               servo_angle[0],
+               servo_angle[1],
+               servo_angle[2],
+               servo_angle[3]);
     }
 
     close(fd);

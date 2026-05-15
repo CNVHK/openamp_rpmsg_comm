@@ -13,6 +13,7 @@
 #include "../src/rpmsg_protocol.h"
 #include "jc4010_can.h"
 #include "phytium_can_port.h"
+#include "phytium_servo_port.h"
 #include "fsleep.h"
 #include <stdint.h>
 #include <string.h>
@@ -66,6 +67,33 @@ static void write_be_u32(uint8_t *p, uint32_t value)
     p[1] = (uint8_t)(value >> 16);
     p[2] = (uint8_t)(value >> 8);
     p[3] = (uint8_t)(value & 0xff);
+}
+
+static void write_be_u16(uint8_t *p, uint16_t value)
+{
+    p[0] = (uint8_t)(value >> 8);
+    p[1] = (uint8_t)(value & 0xff);
+}
+
+static void handle_servo_set4(const uint8_t *payload, uint8_t length)
+{
+    uint16_t angles[PHYTIUM_SERVO_NUM];
+
+    if (length < PHYTIUM_SERVO_NUM * 2U) {
+        return;
+    }
+
+    for (int i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
+        angles[i] = read_be_u16(&payload[i * 2]);
+    }
+
+    phytium_servo_set_all(angles);
+}
+
+static void handle_servo_center(void)
+{
+    const uint16_t angles[PHYTIUM_SERVO_NUM] = {90, 90, 90, 90};
+    phytium_servo_set_all(angles);
 }
 
 static void handle_can_enable(uint8_t motor_id)
@@ -179,7 +207,8 @@ static void handle_can_g431_demo(uint8_t state)
 static size_t build_ack(uint8_t seq, uint8_t *out, size_t out_size)
 {
     const PhytiumCanDebugState *can_dbg = phytium_can_get_debug_state();
-    uint8_t payload[56];
+    const PhytiumServoDebugState *servo_dbg = phytium_servo_get_debug_state();
+    uint8_t payload[64];
     memset(payload, 0, sizeof(payload));
 
     payload[0] = (uint8_t)g_state.motor_left;
@@ -209,8 +238,13 @@ static size_t build_ack(uint8_t seq, uint8_t *out, size_t out_size)
     write_be_u32(&payload[38], can_dbg->reg_err_cnt);
     write_be_u32(&payload[42], can_dbg->reg_fifo_cnt);
     write_be_u32(&payload[46], can_dbg->reg_xfer_en);
+    payload[50] = (uint8_t)servo_dbg->init_ret;
+    payload[51] = (uint8_t)servo_dbg->last_ret;
+    for (int i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
+        write_be_u16(&payload[52 + i * 2], servo_dbg->angle_deg[i]);
+    }
 
-    return rpmsg_encode(CMD_HEARTBEAT, seq, payload, 50, out, out_size);
+    return rpmsg_encode(CMD_HEARTBEAT, seq, payload, 60, out, out_size);
 }
 
 size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply, size_t reply_size)
@@ -254,6 +288,12 @@ size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply,
         return build_ack(frame.seq, reply, reply_size);
     case CMD_CAN_G431_DEMO:
         handle_can_g431_demo(frame.length >= 1 ? frame.payload[0] : 0);
+        return build_ack(frame.seq, reply, reply_size);
+    case CMD_SERVO_SET4:
+        handle_servo_set4(frame.payload, frame.length);
+        return build_ack(frame.seq, reply, reply_size);
+    case CMD_SERVO_CENTER:
+        handle_servo_center();
         return build_ack(frame.seq, reply, reply_size);
     case CMD_CAN_ZERO_POSITION:
         if (frame.length >= 1) {

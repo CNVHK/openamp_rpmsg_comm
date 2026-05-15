@@ -1,0 +1,193 @@
+#include "phytium_servo_port.h"
+
+#include "fio_mux.h"
+#include "fpwm.h"
+#include "ftypes.h"
+#include "sdkconfig.h"
+#include <stdio.h>
+#include <string.h>
+
+#define SERVO_PWM_FREQ_HZ 50U
+#define SERVO_PERIOD_US 20000U
+#define SERVO_MIN_US 500U
+#define SERVO_MAX_US 2500U
+#define SERVO_MAX_ANGLE_DEG 180U
+
+/*
+ * One FPWM controller has two independent channels when dead-zone output is
+ * bypassed. Adjust this table after confirming the actual pins used on the
+ * carrier board.
+ */
+typedef struct {
+    u32 pwm_id;
+    u32 channel;
+} ServoPwmMap;
+
+static const ServoPwmMap g_servo_map[PHYTIUM_SERVO_NUM] = {
+    {0, 0},
+    {0, 1},
+    {1, 0},
+    {1, 1},
+};
+
+static FPwmCtrl g_pwm_ctrl[2];
+static int g_servo_ready = 0;
+static PhytiumServoDebugState g_servo_debug = {
+    .init_ret = -99,
+    .last_ret = -99,
+    .angle_deg = {90, 90, 90, 90},
+    .pulse_us = {1500, 1500, 1500, 1500},
+};
+
+static uint16_t servo_clamp_angle(uint16_t angle_deg)
+{
+    return angle_deg > SERVO_MAX_ANGLE_DEG ? SERVO_MAX_ANGLE_DEG : angle_deg;
+}
+
+static uint16_t servo_angle_to_pulse_us(uint16_t angle_deg)
+{
+    angle_deg = servo_clamp_angle(angle_deg);
+    return (uint16_t)(SERVO_MIN_US +
+                      ((uint32_t)(SERVO_MAX_US - SERVO_MIN_US) * angle_deg) / SERVO_MAX_ANGLE_DEG);
+}
+
+static uint16_t servo_pulse_to_ccr_us(uint16_t pulse_us)
+{
+    if (pulse_us < SERVO_MIN_US) {
+        pulse_us = SERVO_MIN_US;
+    }
+    if (pulse_us > SERVO_MAX_US) {
+        pulse_us = SERVO_MAX_US;
+    }
+
+    /*
+     * With 50 Hz PWM, using period=20000 lets the CCR value correspond to us.
+     * If a specific SDK/platform interprets period in clock ticks, keep the
+     * mapping here as the only place to adjust.
+     */
+    return pulse_us;
+}
+
+const PhytiumServoDebugState *phytium_servo_get_debug_state(void)
+{
+    return &g_servo_debug;
+}
+
+int phytium_servo_init(void)
+{
+    FError ret;
+    FPwmDbVariableConfig db_cfg;
+    FPwmVariableConfig pwm_cfg;
+
+    if (g_servo_ready) {
+        g_servo_debug.init_ret = 0;
+        return 0;
+    }
+
+    memset(g_pwm_ctrl, 0, sizeof(g_pwm_ctrl));
+    memset(&db_cfg, 0, sizeof(db_cfg));
+    memset(&pwm_cfg, 0, sizeof(pwm_cfg));
+
+    db_cfg.db_out_mode = FPWM_DB_OUT_MODE_BYPASS;
+
+    pwm_cfg.tim_ctrl_enable = TRUE;
+    pwm_cfg.tim_ctrl_mode = 0;
+    pwm_cfg.tim_ctrl_div = 50;
+    pwm_cfg.pwm_period = SERVO_PERIOD_US;
+    pwm_cfg.pwm_mode = 0;
+    pwm_cfg.pwm_polarity = 0;
+    pwm_cfg.pwm_duty_source_mode = FPWM_DUTY_CCR;
+    pwm_cfg.pwm_pulse = 1500;
+
+    for (u32 pwm_id = 0; pwm_id < 2; ++pwm_id) {
+        const FPwmConfig *cfg = FPwmLookupConfig(pwm_id);
+        if (!cfg) {
+            g_servo_debug.init_ret = -1;
+            printf("servo_init: FPwmLookupConfig(%u) failed\r\n", (unsigned)pwm_id);
+            return -1;
+        }
+
+        ret = FPwmCfgInitialize(&g_pwm_ctrl[pwm_id], cfg);
+        if (ret != FPWM_SUCCESS) {
+            g_servo_debug.init_ret = -2;
+            printf("servo_init: FPwmCfgInitialize(%u) failed ret=%d\r\n", (unsigned)pwm_id, ret);
+            return -2;
+        }
+
+        ret = FPwmDbVariableSet(&g_pwm_ctrl[pwm_id], &db_cfg);
+        if (ret != FPWM_SUCCESS) {
+            g_servo_debug.init_ret = -3;
+            printf("servo_init: FPwmDbVariableSet(%u) failed ret=%d\r\n", (unsigned)pwm_id, ret);
+            return -3;
+        }
+    }
+
+    for (u32 i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
+        const ServoPwmMap *map = &g_servo_map[i];
+        FIOPadSetPwmMux(map->pwm_id, map->channel);
+        ret = FPwmVariableSet(&g_pwm_ctrl[map->pwm_id], map->channel, &pwm_cfg);
+        if (ret != FPWM_SUCCESS) {
+            g_servo_debug.init_ret = -4;
+            printf("servo_init: FPwmVariableSet servo=%u pwm=%u ch=%u ret=%d\r\n",
+                   (unsigned)i, (unsigned)map->pwm_id, (unsigned)map->channel, ret);
+            return -4;
+        }
+        FPwmEnable(&g_pwm_ctrl[map->pwm_id], map->channel);
+    }
+
+    g_servo_ready = 1;
+    g_servo_debug.init_ret = 0;
+    g_servo_debug.last_ret = 0;
+    return phytium_servo_set_all(g_servo_debug.angle_deg);
+}
+
+int phytium_servo_set_angle(uint8_t servo_id, uint16_t angle_deg)
+{
+    FError ret;
+    uint16_t pulse_us;
+    uint16_t ccr;
+    const ServoPwmMap *map;
+
+    if (servo_id >= PHYTIUM_SERVO_NUM) {
+        g_servo_debug.last_ret = -1;
+        return -1;
+    }
+
+    if (!g_servo_ready) {
+        int init_ret = phytium_servo_init();
+        if (init_ret != 0) {
+            g_servo_debug.last_ret = -2;
+            return -2;
+        }
+    }
+
+    angle_deg = servo_clamp_angle(angle_deg);
+    pulse_us = servo_angle_to_pulse_us(angle_deg);
+    ccr = servo_pulse_to_ccr_us(pulse_us);
+    map = &g_servo_map[servo_id];
+
+    ret = FPwmPulseSet(&g_pwm_ctrl[map->pwm_id], map->channel, ccr);
+    if (ret != FPWM_SUCCESS) {
+        g_servo_debug.last_ret = -3;
+        printf("servo_set: FPwmPulseSet servo=%u pwm=%u ch=%u ccr=%u ret=%d\r\n",
+               servo_id, (unsigned)map->pwm_id, (unsigned)map->channel, ccr, ret);
+        return -3;
+    }
+
+    g_servo_debug.angle_deg[servo_id] = angle_deg;
+    g_servo_debug.pulse_us[servo_id] = pulse_us;
+    g_servo_debug.last_ret = 0;
+    return 0;
+}
+
+int phytium_servo_set_all(const uint16_t angle_deg[PHYTIUM_SERVO_NUM])
+{
+    int ret = 0;
+    for (uint8_t i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
+        int one_ret = phytium_servo_set_angle(i, angle_deg[i]);
+        if (one_ret != 0) {
+            ret = one_ret;
+        }
+    }
+    return ret;
+}

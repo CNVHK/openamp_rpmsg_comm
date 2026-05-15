@@ -20,7 +20,9 @@ typedef enum {
     CMD_CAN_SET_MODE = 14,
     CMD_CAN_INIT_MOTOR = 15,
     CMD_CAN_G431_INIT = 16,
-    CMD_CAN_G431_DEMO = 17
+    CMD_CAN_G431_DEMO = 17,
+    CMD_SERVO_SET4 = 30,
+    CMD_SERVO_CENTER = 31
 } CommandType;
 
 typedef struct {
