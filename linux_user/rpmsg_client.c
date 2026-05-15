@@ -8,7 +8,7 @@
 #include <sys/select.h>
 #include <unistd.h>
 
-#define RPMSG_CLIENT_VERSION "0.4.0-can-debug"
+#define RPMSG_CLIENT_VERSION "0.5.0-g431-demo"
 
 static int wait_readable(int fd, int timeout_ms)
 {
@@ -52,11 +52,16 @@ static void usage(const char *prog)
     printf("  %s <rpmsg_dev> zero <motor_id>\n", prog);
     printf("  %s <rpmsg_dev> mode <motor_id> <mode>\n", prog);
     printf("  %s <rpmsg_dev> init <motor_id>\n", prog);
+    printf("  %s <rpmsg_dev> g431init\n", prog);
+    printf("  %s <rpmsg_dev> g431demo <0|1>\n", prog);
     printf("  %s <rpmsg_dev> pvt <motor_id> <pos_x100_deg> <speed_rpm> <torque_percent>\n", prog);
     printf("  %s <rpmsg_dev> stop [motor_id]\n", prog);
     printf("\nExamples:\n");
     printf("  %s /dev/rpmsg0 heartbeat\n", prog);
     printf("  %s /dev/rpmsg0 init 1\n", prog);
+    printf("  %s /dev/rpmsg0 g431init\n", prog);
+    printf("  %s /dev/rpmsg0 g431demo 0\n", prog);
+    printf("  %s /dev/rpmsg0 g431demo 1\n", prog);
     printf("  %s /dev/rpmsg0 enable 1\n", prog);
     printf("  %s /dev/rpmsg0 pvt 1 1000 100 20\n", prog);
     printf("  %s /dev/rpmsg0 stop 1\n", prog);
@@ -103,6 +108,19 @@ static int build_command(int argc, char **argv, uint8_t *type, uint8_t *payload,
         if (argc < 4) return -1;
         *type = CMD_CAN_INIT_MOTOR;
         payload[0] = (uint8_t)strtoul(argv[3], NULL, 0);
+        *payload_len = 1;
+        return 0;
+    }
+
+    if (strcmp(cmd, "g431init") == 0) {
+        *type = CMD_CAN_G431_INIT;
+        *payload_len = 0;
+        return 0;
+    }
+
+    if (strcmp(cmd, "g431demo") == 0) {
+        *type = CMD_CAN_G431_DEMO;
+        payload[0] = argc >= 4 ? (uint8_t)strtoul(argv[3], NULL, 0) : 0;
         *payload_len = 1;
         return 0;
     }

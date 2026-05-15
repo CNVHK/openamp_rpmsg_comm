@@ -128,6 +128,46 @@ static void handle_can_init_motor(uint8_t motor_id)
     fsleep_millisec(10);
 }
 
+static void handle_can_g431_init(void)
+{
+    /*
+     * Match G431_CAN/Core/Src/main.c more closely:
+     * send the same setup command to motor 1 and 2, then wait once.
+     */
+    handle_can_clear_fault(1);
+    handle_can_clear_fault(2);
+    fsleep_millisec(2000);
+
+    handle_can_set_mode(1, 2);
+    handle_can_set_mode(2, 2);
+    fsleep_millisec(10);
+
+    handle_can_zero(1);
+    handle_can_zero(2);
+    fsleep_millisec(10);
+
+    handle_can_enable(1);
+    handle_can_enable(2);
+    fsleep_millisec(10);
+}
+
+static void handle_can_g431_demo(uint8_t state)
+{
+    Jc4010CanFrame can_frame;
+
+    if (state == 0) {
+        jc4010_build_pvt(1, 36000, 200, 50, &can_frame);
+        send_jc4010_frame(&can_frame);
+        jc4010_build_pvt(2, 9000, 200, 50, &can_frame);
+        send_jc4010_frame(&can_frame);
+    } else {
+        jc4010_build_pvt(1, 0, 200, 80, &can_frame);
+        send_jc4010_frame(&can_frame);
+        jc4010_build_pvt(2, 0, 200, 80, &can_frame);
+        send_jc4010_frame(&can_frame);
+    }
+}
+
 static size_t build_ack(uint8_t seq, uint8_t *out, size_t out_size)
 {
     const PhytiumCanDebugState *can_dbg = phytium_can_get_debug_state();
@@ -194,6 +234,12 @@ size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply,
         if (frame.length >= 1) {
             handle_can_init_motor(frame.payload[0]);
         }
+        return build_ack(frame.seq, reply, reply_size);
+    case CMD_CAN_G431_INIT:
+        handle_can_g431_init();
+        return build_ack(frame.seq, reply, reply_size);
+    case CMD_CAN_G431_DEMO:
+        handle_can_g431_demo(frame.length >= 1 ? frame.payload[0] : 0);
         return build_ack(frame.seq, reply, reply_size);
     case CMD_CAN_ZERO_POSITION:
         if (frame.length >= 1) {
