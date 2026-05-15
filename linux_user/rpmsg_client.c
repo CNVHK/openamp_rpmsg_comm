@@ -8,7 +8,7 @@
 #include <sys/select.h>
 #include <unistd.h>
 
-#define RPMSG_CLIENT_VERSION "0.5.0-g431-demo"
+#define RPMSG_CLIENT_VERSION "0.6.0-can-reg-debug"
 
 static int wait_readable(int fd, int timeout_ms)
 {
@@ -249,6 +249,24 @@ int main(int argc, char **argv)
                ack.payload[23],
                ack.payload[24],
                ack.payload[25]);
+    }
+
+    if (ack.length >= 50) {
+        uint32_t reg_ctrl = read_be_u32(&ack.payload[26]);
+        uint32_t reg_intr = read_be_u32(&ack.payload[30]);
+        uint32_t reg_xfer_sts = read_be_u32(&ack.payload[34]);
+        uint32_t reg_err_cnt = read_be_u32(&ack.payload[38]);
+        uint32_t reg_fifo_cnt = read_be_u32(&ack.payload[42]);
+        uint32_t reg_xfer_en = read_be_u32(&ack.payload[46]);
+        uint32_t tx_err = (reg_err_cnt >> 16) & 0x1ff;
+        uint32_t rx_err = reg_err_cnt & 0x1ff;
+        uint32_t tx_fifo = (reg_fifo_cnt >> 16) & 0x7f;
+        uint32_t rx_fifo = reg_fifo_cnt & 0x7f;
+
+        printf("can regs: CTRL=0x%08X INTR=0x%08X XFER_STS=0x%08X ERR_CNT=0x%08X FIFO_CNT=0x%08X XFER_EN=0x%08X\n",
+               reg_ctrl, reg_intr, reg_xfer_sts, reg_err_cnt, reg_fifo_cnt, reg_xfer_en);
+        printf("can decoded: tx_err=%u rx_err=%u tx_fifo=%u rx_fifo=%u transfer_enable=%u\n",
+               tx_err, rx_err, tx_fifo, rx_fifo, reg_xfer_en & 0x1);
     }
 
     close(fd);

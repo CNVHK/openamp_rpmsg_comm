@@ -12,6 +12,12 @@ typedef struct {
     uint32_t last_frame_id;
     uint8_t last_frame_dlc;
     uint8_t last_frame_data[8];
+    uint32_t reg_ctrl;
+    uint32_t reg_intr;
+    uint32_t reg_xfer_sts;
+    uint32_t reg_err_cnt;
+    uint32_t reg_fifo_cnt;
+    uint32_t reg_xfer_en;
 } PhytiumCanDebugState;
 
 /* Platform adapter.
