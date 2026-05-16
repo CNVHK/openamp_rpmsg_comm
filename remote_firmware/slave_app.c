@@ -12,6 +12,7 @@
 
 #include "../src/rpmsg_protocol.h"
 #include "jc4010_can.h"
+#include "phytium_bmi088_port.h"
 #include "phytium_can_port.h"
 #include "phytium_servo_port.h"
 #include "fsleep.h"
@@ -94,6 +95,16 @@ static void handle_servo_center(void)
 {
     const uint16_t angles[PHYTIUM_SERVO_NUM] = {90, 90, 90, 90};
     phytium_servo_set_all(angles);
+}
+
+static void handle_imu_init(void)
+{
+    (void)phytium_bmi088_init();
+}
+
+static void handle_imu_read(void)
+{
+    (void)phytium_bmi088_read_sample();
 }
 
 static void handle_can_enable(uint8_t motor_id)
@@ -208,7 +219,8 @@ static size_t build_ack(uint8_t seq, uint8_t *out, size_t out_size)
 {
     const PhytiumCanDebugState *can_dbg = phytium_can_get_debug_state();
     const PhytiumServoDebugState *servo_dbg = phytium_servo_get_debug_state();
-    uint8_t payload[64];
+    const PhytiumBmi088DebugState *imu_dbg = phytium_bmi088_get_debug_state();
+    uint8_t payload[88];
     memset(payload, 0, sizeof(payload));
 
     payload[0] = (uint8_t)g_state.motor_left;
@@ -243,8 +255,17 @@ static size_t build_ack(uint8_t seq, uint8_t *out, size_t out_size)
     for (int i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
         write_be_u16(&payload[52 + i * 2], servo_dbg->angle_deg[i]);
     }
+    payload[60] = (uint8_t)imu_dbg->init_ret;
+    payload[61] = (uint8_t)imu_dbg->last_ret;
+    payload[62] = imu_dbg->accel_chip_id;
+    payload[63] = imu_dbg->gyro_chip_id;
+    for (int i = 0; i < 3; ++i) {
+        write_be_u16(&payload[64 + i * 2], (uint16_t)imu_dbg->accel_raw[i]);
+        write_be_u16(&payload[70 + i * 2], (uint16_t)imu_dbg->gyro_raw[i]);
+    }
+    write_be_u32(&payload[76], imu_dbg->read_count);
 
-    return rpmsg_encode(CMD_HEARTBEAT, seq, payload, 60, out, out_size);
+    return rpmsg_encode(CMD_HEARTBEAT, seq, payload, 80, out, out_size);
 }
 
 size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply, size_t reply_size)
@@ -294,6 +315,12 @@ size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply,
         return build_ack(frame.seq, reply, reply_size);
     case CMD_SERVO_CENTER:
         handle_servo_center();
+        return build_ack(frame.seq, reply, reply_size);
+    case CMD_IMU_INIT:
+        handle_imu_init();
+        return build_ack(frame.seq, reply, reply_size);
+    case CMD_IMU_READ:
+        handle_imu_read();
         return build_ack(frame.seq, reply, reply_size);
     case CMD_CAN_ZERO_POSITION:
         if (frame.length >= 1) {

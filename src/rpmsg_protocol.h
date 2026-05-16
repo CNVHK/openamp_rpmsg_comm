@@ -6,7 +6,7 @@
 #include <stdbool.h>
 
 #define RPMSG_FRAME_MAGIC 0xA5
-#define RPMSG_MAX_PAYLOAD 64
+#define RPMSG_MAX_PAYLOAD 88
 
 typedef enum {
     CMD_HEARTBEAT = 1,
@@ -22,7 +22,9 @@ typedef enum {
     CMD_CAN_G431_INIT = 16,
     CMD_CAN_G431_DEMO = 17,
     CMD_SERVO_SET4 = 30,
-    CMD_SERVO_CENTER = 31
+    CMD_SERVO_CENTER = 31,
+    CMD_IMU_INIT = 40,
+    CMD_IMU_READ = 41
 } CommandType;
 
 typedef struct {

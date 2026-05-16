@@ -8,7 +8,7 @@
 #include <sys/select.h>
 #include <unistd.h>
 
-#define RPMSG_CLIENT_VERSION "0.7.0-servo4"
+#define RPMSG_CLIENT_VERSION "0.8.0-bmi088-spi"
 
 static int wait_readable(int fd, int timeout_ms)
 {
@@ -56,6 +56,8 @@ static void usage(const char *prog)
     printf("  %s <rpmsg_dev> g431demo <0|1>\n", prog);
     printf("  %s <rpmsg_dev> servo <s0_deg> <s1_deg> <s2_deg> <s3_deg>\n", prog);
     printf("  %s <rpmsg_dev> servocenter\n", prog);
+    printf("  %s <rpmsg_dev> imuinit\n", prog);
+    printf("  %s <rpmsg_dev> imuread\n", prog);
     printf("  %s <rpmsg_dev> pvt <motor_id> <pos_x100_deg> <speed_rpm> <torque_percent>\n", prog);
     printf("  %s <rpmsg_dev> stop [motor_id]\n", prog);
     printf("\nExamples:\n");
@@ -66,6 +68,8 @@ static void usage(const char *prog)
     printf("  %s /dev/rpmsg0 g431demo 1\n", prog);
     printf("  %s /dev/rpmsg0 servo 90 90 90 90\n", prog);
     printf("  %s /dev/rpmsg0 servocenter\n", prog);
+    printf("  %s /dev/rpmsg0 imuinit\n", prog);
+    printf("  %s /dev/rpmsg0 imuread\n", prog);
     printf("  %s /dev/rpmsg0 enable 1\n", prog);
     printf("  %s /dev/rpmsg0 pvt 1 1000 100 20\n", prog);
     printf("  %s /dev/rpmsg0 stop 1\n", prog);
@@ -147,6 +151,18 @@ static int build_command(int argc, char **argv, uint8_t *type, uint8_t *payload,
         return 0;
     }
 
+    if (strcmp(cmd, "imuinit") == 0) {
+        *type = CMD_IMU_INIT;
+        *payload_len = 0;
+        return 0;
+    }
+
+    if (strcmp(cmd, "imuread") == 0) {
+        *type = CMD_IMU_READ;
+        *payload_len = 0;
+        return 0;
+    }
+
     if (strcmp(cmd, "pvt") == 0) {
         if (argc < 7) return -1;
         *type = CMD_CAN_PVT;
@@ -178,8 +194,8 @@ int main(int argc, char **argv)
     uint8_t type;
     uint8_t payload[RPMSG_MAX_PAYLOAD];
     uint8_t payload_len;
-    uint8_t tx_frame[96];
-    uint8_t rx_frame[96];
+    uint8_t tx_frame[128];
+    uint8_t rx_frame[128];
     RpmsgFrame ack;
 
     printf("rpmsg_client version: %s\n", RPMSG_CLIENT_VERSION);
@@ -307,6 +323,26 @@ int main(int argc, char **argv)
                servo_angle[1],
                servo_angle[2],
                servo_angle[3]);
+    }
+
+    if (ack.length >= 80) {
+        int16_t acc[3];
+        int16_t gyro[3];
+        for (int i = 0; i < 3; ++i) {
+            acc[i] = (int16_t)(((uint16_t)ack.payload[64 + i * 2] << 8) |
+                               ack.payload[65 + i * 2]);
+            gyro[i] = (int16_t)(((uint16_t)ack.payload[70 + i * 2] << 8) |
+                                ack.payload[71 + i * 2]);
+        }
+
+        printf("imu debug: init_ret=%d last_ret=%d accel_id=0x%02X gyro_id=0x%02X read_count=%u\n",
+               (int8_t)ack.payload[60],
+               (int8_t)ack.payload[61],
+               ack.payload[62],
+               ack.payload[63],
+               read_be_u32(&ack.payload[76]));
+        printf("imu raw: acc=%d,%d,%d gyro=%d,%d,%d\n",
+               acc[0], acc[1], acc[2], gyro[0], gyro[1], gyro[2]);
     }
 
     close(fd);
