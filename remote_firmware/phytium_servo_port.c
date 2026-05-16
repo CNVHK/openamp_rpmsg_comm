@@ -21,16 +21,17 @@
 typedef struct {
     u32 pwm_id;
     u32 channel;
+    u8 enabled;
 } ServoPwmMap;
 
 static const ServoPwmMap g_servo_map[PHYTIUM_SERVO_NUM] = {
-    {1, 0}, // 舵机0 -> PWM2_OUT -> AG57 -> 40Pin Pin32
-    {2, 1}, // 舵机1 -> PWM5_OUT -> C39  -> 40Pin Pin33
-    {0, 0},
-    {0, 1},
+    {1, 0, TRUE},  /* servo0 -> PWM2_OUT -> AG57 -> 40Pin Pin32 */
+    {2, 1, FALSE}, /* servo1 -> PWM5_OUT -> C39  -> 40Pin Pin33 */
+    {0, 0, FALSE},
+    {0, 1, FALSE},
 };
 
-static FPwmCtrl g_pwm_ctrl[2];
+static FPwmCtrl g_pwm_ctrl[FPWM_NUM];
 static int g_servo_ready = 0;
 static PhytiumServoDebugState g_servo_debug = {
     .init_ret = -99,
@@ -78,6 +79,7 @@ int phytium_servo_init(void)
     FError ret;
     FPwmDbVariableConfig db_cfg;
     FPwmVariableConfig pwm_cfg;
+    u8 pwm_inited[FPWM_NUM];
 
     if (g_servo_ready) {
         g_servo_debug.init_ret = 0;
@@ -85,21 +87,44 @@ int phytium_servo_init(void)
     }
 
     memset(g_pwm_ctrl, 0, sizeof(g_pwm_ctrl));
+    memset(pwm_inited, 0, sizeof(pwm_inited));
     memset(&db_cfg, 0, sizeof(db_cfg));
     memset(&pwm_cfg, 0, sizeof(pwm_cfg));
 
     db_cfg.db_out_mode = FPWM_DB_OUT_MODE_BYPASS;
 
     pwm_cfg.tim_ctrl_mode = 0;
-    pwm_cfg.tim_ctrl_div = 50;
+    /* E2000 FPWM reference clock is 50 MHz; div=49 gives a 1 MHz counter. */
+    pwm_cfg.tim_ctrl_div = 49;
     pwm_cfg.pwm_period = SERVO_PERIOD_US;
     pwm_cfg.pwm_mode = 0;
     pwm_cfg.pwm_polarity = 0;
     pwm_cfg.pwm_duty_source_mode = FPWM_DUTY_CCR;
     pwm_cfg.pwm_pulse = 1500;
 
-    for (u32 pwm_id = 0; pwm_id < 2; ++pwm_id) {
-        const FPwmConfig *cfg = FPwmLookupConfig(pwm_id);
+    FIOMuxInit();
+
+    for (u32 i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
+        const ServoPwmMap *map = &g_servo_map[i];
+        u32 pwm_id = map->pwm_id;
+        const FPwmConfig *cfg;
+
+        if (!map->enabled) {
+            continue;
+        }
+
+        if (pwm_id >= FPWM_NUM) {
+            g_servo_debug.init_ret = -1;
+            printf("servo_init: pwm id out of range servo=%u pwm=%u\r\n",
+                   (unsigned)i, (unsigned)pwm_id);
+            return -1;
+        }
+
+        if (pwm_inited[pwm_id]) {
+            continue;
+        }
+
+        cfg = FPwmLookupConfig(pwm_id);
         if (!cfg) {
             g_servo_debug.init_ret = -1;
             printf("servo_init: FPwmLookupConfig(%u) failed\r\n", (unsigned)pwm_id);
@@ -119,10 +144,16 @@ int phytium_servo_init(void)
             printf("servo_init: FPwmDbVariableSet(%u) failed ret=%d\r\n", (unsigned)pwm_id, ret);
             return -3;
         }
+
+        pwm_inited[pwm_id] = TRUE;
     }
 
     for (u32 i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
         const ServoPwmMap *map = &g_servo_map[i];
+        if (!map->enabled) {
+            continue;
+        }
+
         FIOPadSetPwmMux(map->pwm_id, map->channel);
         ret = FPwmVariableSet(&g_pwm_ctrl[map->pwm_id], map->channel, &pwm_cfg);
         if (ret != FPWM_SUCCESS) {
@@ -164,6 +195,13 @@ int phytium_servo_set_angle(uint8_t servo_id, uint16_t angle_deg)
     pulse_us = servo_angle_to_pulse_us(angle_deg);
     ccr = servo_pulse_to_ccr_us(pulse_us);
     map = &g_servo_map[servo_id];
+
+    if (!map->enabled) {
+        g_servo_debug.angle_deg[servo_id] = angle_deg;
+        g_servo_debug.pulse_us[servo_id] = pulse_us;
+        g_servo_debug.last_ret = 0;
+        return 0;
+    }
 
     ret = FPwmPulseSet(&g_pwm_ctrl[map->pwm_id], map->channel, ccr);
     if (ret != FPWM_SUCCESS) {
