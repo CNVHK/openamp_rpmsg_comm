@@ -70,6 +70,7 @@ static void usage(const char *prog)
     printf("  %s /dev/rpmsg0 servocenter\n", prog);
     printf("  %s /dev/rpmsg0 imuinit\n", prog);
     printf("  %s /dev/rpmsg0 imuread\n", prog);
+    printf("  watch -n 0.1 '%s /dev/rpmsg0 imuread'\n", prog);
     printf("  %s /dev/rpmsg0 enable 1\n", prog);
     printf("  %s /dev/rpmsg0 pvt 1 1000 100 20\n", prog);
     printf("  %s /dev/rpmsg0 stop 1\n", prog);

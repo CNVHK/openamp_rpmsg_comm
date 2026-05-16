@@ -48,6 +48,22 @@
 #define BMI088_ACCEL_CHIP_ID     0x1EU
 #define BMI088_GYRO_CHIP_ID      0x0FU
 
+#define BMI088_ACCEL_CONF_REG     0x40U
+#define BMI088_ACCEL_RANGE_REG    0x41U
+#define BMI088_ACCEL_PWR_CONF_REG 0x7CU
+#define BMI088_ACCEL_PWR_CTRL_REG 0x7DU
+#define BMI088_GYRO_RANGE_REG     0x0FU
+#define BMI088_GYRO_BW_REG        0x10U
+#define BMI088_GYRO_LPM1_REG      0x11U
+
+#define BMI088_ACCEL_PWR_ENABLE   0x04U
+#define BMI088_ACCEL_PM_ACTIVE    0x00U
+#define BMI088_ACCEL_CONF_100HZ   0xA8U
+#define BMI088_ACCEL_RANGE_6G     0x01U
+#define BMI088_GYRO_PM_NORMAL     0x00U
+#define BMI088_GYRO_BW_100HZ_32HZ 0x07U
+#define BMI088_GYRO_RANGE_1000DPS 0x01U
+
 typedef enum {
     BMI088_DEV_ACCEL = 0,
     BMI088_DEV_GYRO = 1
@@ -105,6 +121,59 @@ static int bmi088_read_reg(Bmi088Dev dev, uint8_t reg, uint8_t *data, uint32_t l
 
     memcpy(data, &rx[1U + dummy], len);
     g_dbg.last_ret = 0;
+    return 0;
+}
+
+static int bmi088_write_reg(Bmi088Dev dev, uint8_t reg, uint8_t value)
+{
+    uint8_t tx[2];
+    uint8_t rx[2];
+
+    tx[0] = (uint8_t)(reg & 0x7fU);
+    tx[1] = value;
+    memset(rx, 0, sizeof(rx));
+
+    bmi088_select(dev, TRUE);
+    int ret = bmi088_transfer(tx, rx, sizeof(tx));
+    bmi088_select(dev, FALSE);
+
+    if (ret != 0) {
+        return ret;
+    }
+
+    g_dbg.last_ret = 0;
+    return 0;
+}
+
+static int bmi088_configure_sensors(void)
+{
+    int ret;
+
+    ret = bmi088_write_reg(BMI088_DEV_ACCEL, BMI088_ACCEL_PWR_CTRL_REG, BMI088_ACCEL_PWR_ENABLE);
+    if (ret != 0) return ret;
+    fsleep_millisec(5);
+
+    ret = bmi088_write_reg(BMI088_DEV_ACCEL, BMI088_ACCEL_PWR_CONF_REG, BMI088_ACCEL_PM_ACTIVE);
+    if (ret != 0) return ret;
+    fsleep_millisec(5);
+
+    ret = bmi088_write_reg(BMI088_DEV_ACCEL, BMI088_ACCEL_CONF_REG, BMI088_ACCEL_CONF_100HZ);
+    if (ret != 0) return ret;
+
+    ret = bmi088_write_reg(BMI088_DEV_ACCEL, BMI088_ACCEL_RANGE_REG, BMI088_ACCEL_RANGE_6G);
+    if (ret != 0) return ret;
+
+    ret = bmi088_write_reg(BMI088_DEV_GYRO, BMI088_GYRO_LPM1_REG, BMI088_GYRO_PM_NORMAL);
+    if (ret != 0) return ret;
+    fsleep_millisec(30);
+
+    ret = bmi088_write_reg(BMI088_DEV_GYRO, BMI088_GYRO_BW_REG, BMI088_GYRO_BW_100HZ_32HZ);
+    if (ret != 0) return ret;
+
+    ret = bmi088_write_reg(BMI088_DEV_GYRO, BMI088_GYRO_RANGE_REG, BMI088_GYRO_RANGE_1000DPS);
+    if (ret != 0) return ret;
+
+    fsleep_millisec(10);
     return 0;
 }
 
@@ -179,6 +248,12 @@ int phytium_bmi088_init(void)
         g_dbg.gyro_chip_id != BMI088_GYRO_CHIP_ID) {
         g_dbg.init_ret = -4;
         return -4;
+    }
+
+    ret = bmi088_configure_sensors();
+    if (ret != 0) {
+        g_dbg.init_ret = -7;
+        return -7;
     }
 
     g_ready = 1;
