@@ -10,7 +10,7 @@
 #include <string.h>
 
 #ifndef PHYTIUM_CAN_ID
-#define PHYTIUM_CAN_ID FCAN0_ID
+#define PHYTIUM_CAN_ID FCAN1_ID
 #endif
 
 #ifndef PHYTIUM_CAN_BAUDRATE

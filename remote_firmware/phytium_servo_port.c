@@ -26,9 +26,9 @@ typedef struct {
 
 static const ServoPwmMap g_servo_map[PHYTIUM_SERVO_NUM] = {
     {1, 0, TRUE},  /* servo0 -> PWM2_OUT -> AG57 -> 40Pin Pin32 */
-    {2, 1, FALSE}, /* servo1 -> PWM5_OUT -> C39  -> 40Pin Pin33 */
-    {0, 0, FALSE},
-    {0, 1, FALSE},
+    {2, 1, TRUE},  /* servo1 -> PWM5_OUT -> C39  -> 40Pin Pin33 */
+    {3, 0, TRUE},  /* servo2 -> PWM6_OUT -> A37  -> 40Pin Pin7 */
+    {3, 1, TRUE},  /* servo3 -> PWM7_OUT -> A43 -> released after CAN moves to CAN1 */
 };
 
 static FPwmCtrl g_pwm_ctrl[FPWM_NUM];
