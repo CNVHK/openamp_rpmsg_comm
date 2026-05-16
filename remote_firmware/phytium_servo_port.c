@@ -97,8 +97,8 @@ int phytium_servo_init(void)
     /* E2000 FPWM reference clock is 50 MHz; div=49 gives a 1 MHz counter. */
     pwm_cfg.tim_ctrl_div = 49;
     pwm_cfg.pwm_period = SERVO_PERIOD_US;
-    pwm_cfg.pwm_mode = 0;
-    pwm_cfg.pwm_polarity = 0;
+    pwm_cfg.pwm_mode = FPWM_OUTPUT_COMPARE;
+    pwm_cfg.pwm_polarity = FPWM_POLARITY_NORMAL;
     pwm_cfg.pwm_duty_source_mode = FPWM_DUTY_CCR;
     pwm_cfg.pwm_pulse = 1500;
 
