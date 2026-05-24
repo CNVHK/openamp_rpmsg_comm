@@ -324,6 +324,20 @@ int main(int argc, char **argv)
                servo_angle[1],
                servo_angle[2],
                servo_angle[3]);
+        if (ack.length >= 87) {
+            uint16_t servo_pulse[4];
+            for (int i = 0; i < 4; ++i) {
+                servo_pulse[i] = read_be_u16(&ack.payload[80 + i * 2]);
+            }
+            printf("servo pwm: pulse_us=%u,%u,%u,%u last=servo%u pwm%u ch%u\n",
+                   servo_pulse[0],
+                   servo_pulse[1],
+                   servo_pulse[2],
+                   servo_pulse[3],
+                   ack.payload[84],
+                   ack.payload[85],
+                   ack.payload[86]);
+        }
     }
 
     if (ack.length >= 80) {

@@ -276,6 +276,12 @@ static size_t build_ack(uint8_t seq, uint8_t *out, size_t out_size)
     for (int i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
         write_be_u16(&payload[52 + i * 2], servo_dbg->angle_deg[i]);
     }
+    for (int i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
+        write_be_u16(&payload[80 + i * 2], servo_dbg->pulse_us[i]);
+    }
+    payload[84] = servo_dbg->last_servo_id;
+    payload[85] = servo_dbg->last_pwm_id;
+    payload[86] = servo_dbg->last_channel;
     payload[60] = (uint8_t)imu_dbg->init_ret;
     payload[61] = (uint8_t)imu_dbg->last_ret;
     payload[62] = imu_dbg->accel_chip_id;
@@ -286,7 +292,7 @@ static size_t build_ack(uint8_t seq, uint8_t *out, size_t out_size)
     }
     write_be_u32(&payload[76], imu_dbg->read_count);
 
-    return rpmsg_encode(CMD_HEARTBEAT, seq, payload, 80, out, out_size);
+    return rpmsg_encode(CMD_HEARTBEAT, seq, payload, 88, out, out_size);
 }
 
 size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply, size_t reply_size)

@@ -36,6 +36,9 @@ static int g_servo_ready = 0;
 static PhytiumServoDebugState g_servo_debug = {
     .init_ret = -99,
     .last_ret = -99,
+    .last_servo_id = 0xff,
+    .last_pwm_id = 0xff,
+    .last_channel = 0xff,
     .angle_deg = {90, 90, 90, 90},
     .pulse_us = {1500, 1500, 1500, 1500},
 };
@@ -163,6 +166,9 @@ int phytium_servo_init(void)
         ret = FPwmVariableSet(&g_pwm_ctrl[map->pwm_id], map->channel, &pwm_cfg);
         if (ret != FPWM_SUCCESS) {
             g_servo_debug.init_ret = -4;
+            g_servo_debug.last_servo_id = (uint8_t)i;
+            g_servo_debug.last_pwm_id = (uint8_t)map->pwm_id;
+            g_servo_debug.last_channel = (uint8_t)map->channel;
             printf("servo_init: FPwmVariableSet servo=%u pwm=%u ch=%u ret=%d\r\n",
                    (unsigned)i, (unsigned)map->pwm_id, (unsigned)map->channel, ret);
             return -4;
@@ -204,6 +210,9 @@ int phytium_servo_set_angle(uint8_t servo_id, uint16_t angle_deg)
     if (!map->enabled) {
         g_servo_debug.angle_deg[servo_id] = angle_deg;
         g_servo_debug.pulse_us[servo_id] = pulse_us;
+        g_servo_debug.last_servo_id = servo_id;
+        g_servo_debug.last_pwm_id = (uint8_t)map->pwm_id;
+        g_servo_debug.last_channel = (uint8_t)map->channel;
         g_servo_debug.last_ret = 0;
         return 0;
     }
@@ -213,6 +222,9 @@ int phytium_servo_set_angle(uint8_t servo_id, uint16_t angle_deg)
     ret = FPwmPulseSet(&g_pwm_ctrl[map->pwm_id], map->channel, ccr);
     if (ret != FPWM_SUCCESS) {
         g_servo_debug.last_ret = -3;
+        g_servo_debug.last_servo_id = servo_id;
+        g_servo_debug.last_pwm_id = (uint8_t)map->pwm_id;
+        g_servo_debug.last_channel = (uint8_t)map->channel;
         printf("servo_set: FPwmPulseSet servo=%u pwm=%u ch=%u ccr=%u ret=%d\r\n",
                servo_id, (unsigned)map->pwm_id, (unsigned)map->channel, ccr, ret);
         return -3;
@@ -221,6 +233,9 @@ int phytium_servo_set_angle(uint8_t servo_id, uint16_t angle_deg)
 
     g_servo_debug.angle_deg[servo_id] = angle_deg;
     g_servo_debug.pulse_us[servo_id] = pulse_us;
+    g_servo_debug.last_servo_id = servo_id;
+    g_servo_debug.last_pwm_id = (uint8_t)map->pwm_id;
+    g_servo_debug.last_channel = (uint8_t)map->channel;
     g_servo_debug.last_ret = 0;
     return 0;
 }

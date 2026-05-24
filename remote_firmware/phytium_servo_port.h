@@ -8,6 +8,9 @@
 typedef struct {
     int init_ret;
     int last_ret;
+    uint8_t last_servo_id;
+    uint8_t last_pwm_id;
+    uint8_t last_channel;
     uint16_t angle_deg[PHYTIUM_SERVO_NUM];
     uint16_t pulse_us[PHYTIUM_SERVO_NUM];
 } PhytiumServoDebugState;
