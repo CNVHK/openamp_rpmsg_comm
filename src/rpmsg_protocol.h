@@ -23,6 +23,7 @@ typedef enum {
     CMD_CAN_G431_DEMO = 17,
     CMD_SERVO_SET4 = 30,
     CMD_SERVO_CENTER = 31,
+    CMD_SERVO_PROBE = 32,
     CMD_IMU_INIT = 40,
     CMD_IMU_READ = 41
 } CommandType;
