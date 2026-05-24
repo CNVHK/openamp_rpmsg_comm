@@ -44,6 +44,11 @@ static uint32_t read_be_u32(const uint8_t *p)
            (uint32_t)p[3];
 }
 
+static uint16_t read_be_u16(const uint8_t *p)
+{
+    return (uint16_t)(((uint16_t)p[0] << 8) | p[1]);
+}
+
 static void usage(const char *prog)
 {
     printf("Usage:\n");
