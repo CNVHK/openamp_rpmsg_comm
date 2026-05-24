@@ -97,13 +97,15 @@ static void handle_servo_center(void)
     phytium_servo_set_all(angles);
 }
 
-static void handle_servo_probe(const uint8_t *payload, uint8_t length)
+static void handle_servo_polarity(const uint8_t *payload, uint8_t length)
 {
-    if (length < 3U) {
+    if (length < 1U) {
         return;
     }
 
-    phytium_servo_probe_one(payload[0], read_be_u16(&payload[1]));
+    phytium_servo_set_polarity(payload[0]);
+    const uint16_t angles[PHYTIUM_SERVO_NUM] = {90, 90, 90, 90};
+    phytium_servo_set_all(angles);
 }
 
 static void handle_imu_init(void)
@@ -349,8 +351,8 @@ size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply,
     case CMD_SERVO_CENTER:
         handle_servo_center();
         return build_ack(frame.seq, reply, reply_size);
-    case CMD_SERVO_PROBE:
-        handle_servo_probe(frame.payload, frame.length);
+    case CMD_SERVO_POLARITY:
+        handle_servo_polarity(frame.payload, frame.length);
         return build_ack(frame.seq, reply, reply_size);
     case CMD_IMU_INIT:
         handle_imu_init();

@@ -16,9 +16,9 @@ typedef struct {
 } PhytiumServoDebugState;
 
 int phytium_servo_init(void);
+void phytium_servo_set_polarity(uint8_t polarity);
 int phytium_servo_set_angle(uint8_t servo_id, uint16_t angle_deg);
 int phytium_servo_set_all(const uint16_t angle_deg[PHYTIUM_SERVO_NUM]);
-int phytium_servo_probe_one(uint8_t servo_id, uint16_t angle_deg);
 const PhytiumServoDebugState *phytium_servo_get_debug_state(void);
 
 #endif

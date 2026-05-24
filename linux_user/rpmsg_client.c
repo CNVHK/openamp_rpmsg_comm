@@ -60,7 +60,7 @@ static void usage(const char *prog)
     printf("  %s <rpmsg_dev> g431init\n", prog);
     printf("  %s <rpmsg_dev> g431demo <0|1>\n", prog);
     printf("  %s <rpmsg_dev> servo <s0_deg> <s1_deg> <s2_deg> <s3_deg>\n", prog);
-    printf("  %s <rpmsg_dev> servoprobe <servo_id> <angle_deg>\n", prog);
+    printf("  %s <rpmsg_dev> servopol <0..7>\n", prog);
     printf("  %s <rpmsg_dev> servocenter\n", prog);
     printf("  %s <rpmsg_dev> imuinit\n", prog);
     printf("  %s <rpmsg_dev> imuread\n", prog);
@@ -73,7 +73,7 @@ static void usage(const char *prog)
     printf("  %s /dev/rpmsg0 g431demo 0\n", prog);
     printf("  %s /dev/rpmsg0 g431demo 1\n", prog);
     printf("  %s /dev/rpmsg0 servo 90 90 90 90\n", prog);
-    printf("  %s /dev/rpmsg0 servoprobe 0 90\n", prog);
+    printf("  %s /dev/rpmsg0 servopol 4\n", prog);
     printf("  %s /dev/rpmsg0 servocenter\n", prog);
     printf("  %s /dev/rpmsg0 imuinit\n", prog);
     printf("  %s /dev/rpmsg0 imuread\n", prog);
@@ -159,14 +159,13 @@ static int build_command(int argc, char **argv, uint8_t *type, uint8_t *payload,
         return 0;
     }
 
-    if (strcmp(cmd, "servoprobe") == 0) {
-        if (argc < 5) {
+    if (strcmp(cmd, "servopol") == 0) {
+        if (argc < 4) {
             return -1;
         }
-        *type = CMD_SERVO_PROBE;
+        *type = CMD_SERVO_POLARITY;
         payload[0] = (uint8_t)strtoul(argv[3], NULL, 0);
-        put_be_u16(&payload[1], (uint16_t)strtoul(argv[4], NULL, 0));
-        *payload_len = 3;
+        *payload_len = 1;
         return 0;
     }
 
