@@ -187,7 +187,11 @@ int phytium_bmi088_init(void)
         return 0;
     }
 
-    FIOMuxInit();
+    /*
+     * Do not call FIOMuxInit() here. Servo/CAN may already have configured
+     * their pads, and reinitializing the global IOMUX late can disturb PWM
+     * output. Only claim the SPI and CS pads used by BMI088.
+     */
     FIOPadSetSpimMux(PHYTIUM_BMI088_SPI_ID);
     FIOPadSetGpioMux(PHYTIUM_BMI088_ACCEL_CS_GPIO_CTRL, PHYTIUM_BMI088_ACCEL_CS_GPIO_PIN);
     FIOPadSetGpioMux(PHYTIUM_BMI088_GYRO_CS_GPIO_CTRL, PHYTIUM_BMI088_GYRO_CS_GPIO_PIN);
