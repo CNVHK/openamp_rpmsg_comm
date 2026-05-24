@@ -69,6 +69,11 @@ static uint16_t servo_pulse_to_ccr_us(uint16_t pulse_us)
     return pulse_us;
 }
 
+static void servo_reapply_output(const ServoPwmMap *map)
+{
+    FIOPadSetPwmMux(map->pwm_id, map->channel);
+}
+
 const PhytiumServoDebugState *phytium_servo_get_debug_state(void)
 {
     return &g_servo_debug;
@@ -203,6 +208,8 @@ int phytium_servo_set_angle(uint8_t servo_id, uint16_t angle_deg)
         return 0;
     }
 
+    servo_reapply_output(map);
+
     ret = FPwmPulseSet(&g_pwm_ctrl[map->pwm_id], map->channel, ccr);
     if (ret != FPWM_SUCCESS) {
         g_servo_debug.last_ret = -3;
@@ -210,6 +217,7 @@ int phytium_servo_set_angle(uint8_t servo_id, uint16_t angle_deg)
                servo_id, (unsigned)map->pwm_id, (unsigned)map->channel, ccr, ret);
         return -3;
     }
+    FPwmEnable(&g_pwm_ctrl[map->pwm_id], map->channel);
 
     g_servo_debug.angle_deg[servo_id] = angle_deg;
     g_servo_debug.pulse_us[servo_id] = pulse_us;

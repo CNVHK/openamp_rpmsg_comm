@@ -161,11 +161,20 @@ static void handle_can_pvt(const uint8_t *payload, uint8_t length)
 
 static void handle_can_init_motor(uint8_t motor_id)
 {
+    Jc4010CanFrame can_frame;
+
     /*
      * Same command order as G431_CAN/Core/Src/main.c:
      * 0x00A5=1, mode 0x0060=2, zero 0x00A7=1, enable 0x00A2=1.
      */
-    handle_can_clear_fault(motor_id);
+    jc4010_build_clear_fault(motor_id, &can_frame);
+    if (send_jc4010_frame(&can_frame) != 0) {
+        return;
+    }
+    fsleep_millisec(20);
+    if (!phytium_can_bus_ok()) {
+        return;
+    }
     fsleep_millisec(2000);
     handle_can_set_mode(motor_id, 2);
     fsleep_millisec(10);
@@ -177,12 +186,24 @@ static void handle_can_init_motor(uint8_t motor_id)
 
 static void handle_can_g431_init(void)
 {
+    Jc4010CanFrame can_frame;
+
     /*
      * Match G431_CAN/Core/Src/main.c more closely:
      * send the same setup command to motor 1 and 2, then wait once.
      */
-    handle_can_clear_fault(1);
-    handle_can_clear_fault(2);
+    jc4010_build_clear_fault(1, &can_frame);
+    if (send_jc4010_frame(&can_frame) != 0) {
+        return;
+    }
+    jc4010_build_clear_fault(2, &can_frame);
+    if (send_jc4010_frame(&can_frame) != 0) {
+        return;
+    }
+    fsleep_millisec(20);
+    if (!phytium_can_bus_ok()) {
+        return;
+    }
     fsleep_millisec(2000);
 
     handle_can_set_mode(1, 2);

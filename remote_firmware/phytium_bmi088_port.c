@@ -1,5 +1,9 @@
 #include "phytium_bmi088_port.h"
 
+#include "sdkconfig.h"
+
+#if defined(CONFIG_USE_SPI) && defined(CONFIG_USE_FSPIM) && defined(CONFIG_USE_GPIO) && defined(CONFIG_ENABLE_FGPIO)
+
 #include "fio_mux.h"
 #include "fsleep.h"
 #include "fspim.h"
@@ -299,3 +303,30 @@ const PhytiumBmi088DebugState *phytium_bmi088_get_debug_state(void)
 {
     return &g_dbg;
 }
+
+#else
+
+static PhytiumBmi088DebugState g_dbg = {
+    .init_ret = -98,
+    .last_ret = -98,
+};
+
+int phytium_bmi088_init(void)
+{
+    g_dbg.init_ret = -98;
+    g_dbg.last_ret = -98;
+    return -98;
+}
+
+int phytium_bmi088_read_sample(void)
+{
+    g_dbg.last_ret = -98;
+    return -98;
+}
+
+const PhytiumBmi088DebugState *phytium_bmi088_get_debug_state(void)
+{
+    return &g_dbg;
+}
+
+#endif

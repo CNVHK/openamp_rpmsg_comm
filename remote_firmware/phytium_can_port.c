@@ -1,11 +1,14 @@
 #include "phytium_can_port.h"
 
+#include "sdkconfig.h"
+
+#if defined(CONFIG_USE_CAN) && defined(CONFIG_USE_FCAN)
+
 #include "fcan.h"
 #include "fio_mux.h"
 #include "fcan_hw.h"
 #include "fparameters.h"
 #include "ftypes.h"
-#include "sdkconfig.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -191,3 +194,59 @@ int phytium_can_send(const Jc4010CanFrame *frame)
     printf("phytium_can_send: FCanSend ok count=%u\r\n", (unsigned)g_can_debug.send_count);
     return 0;
 }
+
+int phytium_can_bus_ok(void)
+{
+    uint32_t tx_err;
+    uint32_t tx_fifo;
+
+    if (!g_can_ready) {
+        return 0;
+    }
+
+    phytium_can_update_regs();
+    tx_err = (g_can_debug.reg_err_cnt >> 24) & 0xffU;
+    tx_fifo = (g_can_debug.reg_fifo_cnt >> 16) & 0xffU;
+
+    return tx_err < 128U && tx_fifo < 8U;
+}
+
+#else
+
+static PhytiumCanDebugState g_can_debug = {
+    .init_ret = -98,
+    .last_send_ret = -98,
+    .can_id = 1,
+    .baudrate = 1000000U,
+};
+
+int phytium_can_init(void)
+{
+    g_can_debug.init_ret = -98;
+    return -98;
+}
+
+int phytium_can_send(const Jc4010CanFrame *frame)
+{
+    if (frame) {
+        g_can_debug.last_frame_id = frame->id;
+        g_can_debug.last_frame_dlc = frame->dlc;
+        for (int i = 0; i < 8; ++i) {
+            g_can_debug.last_frame_data[i] = frame->data[i];
+        }
+    }
+    g_can_debug.last_send_ret = -98;
+    return -98;
+}
+
+const PhytiumCanDebugState *phytium_can_get_debug_state(void)
+{
+    return &g_can_debug;
+}
+
+int phytium_can_bus_ok(void)
+{
+    return 0;
+}
+
+#endif

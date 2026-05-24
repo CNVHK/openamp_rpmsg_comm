@@ -29,6 +29,7 @@ typedef struct {
  */
 int phytium_can_init(void);
 int phytium_can_send(const Jc4010CanFrame *frame);
+int phytium_can_bus_ok(void);
 const PhytiumCanDebugState *phytium_can_get_debug_state(void);
 
 #endif
