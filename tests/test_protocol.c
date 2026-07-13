@@ -4,18 +4,17 @@
 
 static void test_encode_decode(void)
 {
-    uint8_t payload[2] = {10, 20};
+    uint8_t payload[1] = {1};
     uint8_t buffer[32];
     RpmsgFrame frame;
 
-    size_t size = rpmsg_encode(CMD_SET_MOTOR, 7, payload, 2, buffer, sizeof(buffer));
-    assert(size == 7);
+    size_t size = rpmsg_encode(CMD_CAN_ENABLE, 7, payload, 1, buffer, sizeof(buffer));
+    assert(size == 6);
     assert(rpmsg_decode(buffer, size, &frame));
-    assert(frame.type == CMD_SET_MOTOR);
+    assert(frame.type == CMD_CAN_ENABLE);
     assert(frame.seq == 7);
-    assert(frame.length == 2);
-    assert(frame.payload[0] == 10);
-    assert(frame.payload[1] == 20);
+    assert(frame.length == 1);
+    assert(frame.payload[0] == 1);
 }
 
 static void test_bad_checksum(void)

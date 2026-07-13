@@ -8,7 +8,7 @@
 #include <sys/select.h>
 #include <unistd.h>
 
-#define RPMSG_CLIENT_VERSION "0.8.0-bmi088-spi"
+#define RPMSG_CLIENT_VERSION "0.10.0-motor-origin"
 
 static int wait_readable(int fd, int timeout_ms)
 {
@@ -55,10 +55,10 @@ static void usage(const char *prog)
     printf("  %s <rpmsg_dev> heartbeat\n", prog);
     printf("  %s <rpmsg_dev> enable <motor_id>\n", prog);
     printf("  %s <rpmsg_dev> zero <motor_id>\n", prog);
+    printf("  %s <rpmsg_dev> setorigin <motor_id>\n", prog);
     printf("  %s <rpmsg_dev> mode <motor_id> <mode>\n", prog);
     printf("  %s <rpmsg_dev> init <motor_id>\n", prog);
-    printf("  %s <rpmsg_dev> g431init\n", prog);
-    printf("  %s <rpmsg_dev> g431demo <0|1>\n", prog);
+    printf("  %s <rpmsg_dev> test\n", prog);
     printf("  %s <rpmsg_dev> servo <s0_deg> <s1_deg> <s2_deg> <s3_deg>\n", prog);
     printf("  %s <rpmsg_dev> servopol <0..7>\n", prog);
     printf("  %s <rpmsg_dev> servocenter\n", prog);
@@ -69,9 +69,7 @@ static void usage(const char *prog)
     printf("\nExamples:\n");
     printf("  %s /dev/rpmsg0 heartbeat\n", prog);
     printf("  %s /dev/rpmsg0 init 1\n", prog);
-    printf("  %s /dev/rpmsg0 g431init\n", prog);
-    printf("  %s /dev/rpmsg0 g431demo 0\n", prog);
-    printf("  %s /dev/rpmsg0 g431demo 1\n", prog);
+    printf("  %s /dev/rpmsg0 test\n", prog);
     printf("  %s /dev/rpmsg0 servo 90 90 90 90\n", prog);
     printf("  %s /dev/rpmsg0 servopol 4\n", prog);
     printf("  %s /dev/rpmsg0 servocenter\n", prog);
@@ -111,6 +109,14 @@ static int build_command(int argc, char **argv, uint8_t *type, uint8_t *payload,
         return 0;
     }
 
+    if (strcmp(cmd, "setorigin") == 0) {
+        if (argc < 4) return -1;
+        *type = CMD_CAN_SET_ORIGIN;
+        payload[0] = (uint8_t)strtoul(argv[3], NULL, 0);
+        *payload_len = 1;
+        return 0;
+    }
+
     if (strcmp(cmd, "mode") == 0) {
         if (argc < 5) return -1;
         *type = CMD_CAN_SET_MODE;
@@ -128,16 +134,9 @@ static int build_command(int argc, char **argv, uint8_t *type, uint8_t *payload,
         return 0;
     }
 
-    if (strcmp(cmd, "g431init") == 0) {
-        *type = CMD_CAN_G431_INIT;
+    if (strcmp(cmd, "test") == 0) {
+        *type = CMD_MOTOR_TEST;
         *payload_len = 0;
-        return 0;
-    }
-
-    if (strcmp(cmd, "g431demo") == 0) {
-        *type = CMD_CAN_G431_DEMO;
-        payload[0] = argc >= 4 ? (uint8_t)strtoul(argv[3], NULL, 0) : 0;
-        *payload_len = 1;
         return 0;
     }
 
@@ -271,15 +270,9 @@ int main(int argc, char **argv)
     }
 
     printf("ack type=%u seq=%u payload_len=%u\n", ack.type, ack.seq, ack.length);
-    if (ack.length >= 3) {
-        printf("remote state: motor_left=%d motor_right=%d heartbeat_ok=%u",
-               (int8_t)ack.payload[0],
-               (int8_t)ack.payload[1],
-               ack.payload[2]);
-        if (ack.length >= 4) {
-            printf(" last_can_ret=%d", (int8_t)ack.payload[3]);
-        }
-        printf("\n");
+    if (ack.length >= 4) {
+        printf("remote state: heartbeat_ok=%u last_can_ret=%d\n",
+               ack.payload[2], (int8_t)ack.payload[3]);
     }
 
     if (ack.length >= 26) {

@@ -18,7 +18,7 @@
 - 校验错误：丢弃帧
 - 长度错误：丢弃帧
 - 超时：Linux 侧重发或进入安全状态
-- 从核异常：Linux 侧发送 `CMD_SAFE_STOP`
+- 从核异常：Linux 侧发送 `CMD_CAN_SAFE_STOP`
 
 ## 直接验证
 
@@ -61,11 +61,11 @@ sudo modprobe rpmsg_char
 
 ## CAN 电机控制接入
 
-当前已从 `G431_CAN` 工程中提取 JC4010 电机 CAN 帧格式，并放到：
+电机 CAN 帧组装代码位于：
 
 ```text
-remote_firmware/jc4010_can.c
-remote_firmware/jc4010_can.h
+remote_firmware/motor_can.c
+remote_firmware/motor_can.h
 ```
 
 飞腾从核 CAN 适配层在：
@@ -81,6 +81,7 @@ Linux 客户端支持以下命令：
 sudo ./rpmsg_client /dev/rpmsg0 heartbeat
 sudo ./rpmsg_client /dev/rpmsg0 enable 1
 sudo ./rpmsg_client /dev/rpmsg0 zero 1
+sudo ./rpmsg_client /dev/rpmsg0 test
 sudo ./rpmsg_client /dev/rpmsg0 pvt 1 1000 100 20
 sudo ./rpmsg_client /dev/rpmsg0 stop 1
 ```
@@ -94,7 +95,69 @@ sudo ./rpmsg_client /dev/rpmsg0 stop 1
 力矩百分比 20%
 ```
 
-从核收到 `CMD_CAN_PVT` 后会打包为 JC4010 的 `0x25` PVT CAN 帧，并通过 `phytium_can_send()` 发送。
+从核收到 `CMD_CAN_PVT` 后会打包为 `0x25` PVT CAN 帧，并通过 `phytium_can_send()` 发送。`test` 命令会初始化两台电机，并让两台电机各转动一圈。
+
+## 云台电机测试
+
+`linux_user/gimbal_test.c` 是主核 Linux 侧的云台测试程序，固定使用：
+
+- CAN ID 3：yaw 电机
+- CAN ID 4：pitch 电机
+
+在飞腾派 Linux 上编译：
+
+```bash
+make gimbal
+```
+
+首次安装时，先卸载负载或架空云台，并手动把 yaw、pitch 放到机械中位。确认位置无误后执行永久标零：
+
+```bash
+sudo ./build/gimbal_test /dev/rpmsg0 setzero CONFIRM
+```
+
+该命令分别向 ID 3 和 ID 4 写入永久原点寄存器 `0x00A6`。驱动器会保存当前位置偏置并重启；通常只需要执行一次。重新安装电机、驱动板或机械结构发生变化时才重新标零。
+
+驱动器重启完成后执行日常初始化。初始化只设置位置梯形轨迹模式并进入闭环，不会修改已经保存的原点：
+
+```bash
+sudo ./build/gimbal_test /dev/rpmsg0 init
+```
+
+先用低速、小角度测试。`set` 的角度单位是度，后两个可选参数分别是转速 rpm 和力矩百分比：
+
+```bash
+sudo ./build/gimbal_test /dev/rpmsg0 set 5 0
+sudo ./build/gimbal_test /dev/rpmsg0 set 0 5 20 10
+sudo ./build/gimbal_test /dev/rpmsg0 center
+```
+
+默认扫动幅度为正负 10 度、20 rpm、10% 力矩，只执行一轮：
+
+```bash
+sudo ./build/gimbal_test /dev/rpmsg0 sweep
+sudo ./build/gimbal_test /dev/rpmsg0 sweep 5 2
+```
+
+持续小角度循环测试默认使用正负 5 度，并一直运行到按下 `Ctrl+C`。也可以指定不超过 10 度的幅度：
+
+```bash
+sudo ./build/gimbal_test /dev/rpmsg0 test
+sudo ./build/gimbal_test /dev/rpmsg0 test 3
+```
+
+`test` 不会初始化或修改原点，运行前必须先执行一次 `init`。
+
+停止 ID 3 和 ID 4，或读取通信状态：
+
+```bash
+sudo ./build/gimbal_test /dev/rpmsg0 stop
+sudo ./build/gimbal_test /dev/rpmsg0 status
+```
+
+扫动过程中按 `Ctrl+C` 会向两台电机发送停止命令。程序的软件角度限制当前为 yaw 正负 180 度、pitch 正负 90 度；正式带机构测试前，应按实际机械限位修改 `linux_user/gimbal_test.c` 中的限制值。两个电机命令通过 RPMsg 依次发送，因此该程序适合功能测试，不是严格同步的实时云台控制器。
+
+通用客户端的 `zero <id>` 使用 `0x00A7`，只是临时原点，驱动器重启后失效；`setorigin <id>` 使用 `0x00A6`，会永久保存原点并重启驱动器。不要把两者混用。
 
 ## 从核工程必须配置
 
