@@ -7,7 +7,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#define SERVO_PWM_FREQ_HZ 50U
 #define SERVO_PERIOD_US 20000U
 #define SERVO_MIN_US 500U
 #define SERVO_MAX_US 2500U

@@ -1,12 +1,12 @@
-#include "jc4010_can.h"
+#include "motor_can.h"
 
 #include <assert.h>
 #include <stdio.h>
 
 static void test_pvt_frame(void)
 {
-    Jc4010CanFrame frame;
-    jc4010_build_pvt(1, 36000, 200, 50, &frame);
+    MotorCanFrame frame;
+    motor_build_pvt(1, 36000, 200, 50, &frame);
 
     assert(frame.id == 0x601);
     assert(frame.dlc == 8);
@@ -22,8 +22,8 @@ static void test_pvt_frame(void)
 
 static void test_known_linux_cansend_frame(void)
 {
-    Jc4010CanFrame frame;
-    jc4010_build_pvt(1, 500, 50, 10, &frame);
+    MotorCanFrame frame;
+    motor_build_pvt(1, 500, 50, 10, &frame);
 
     assert(frame.id == 0x601);
     assert(frame.dlc == 8);
@@ -37,23 +37,32 @@ static void test_known_linux_cansend_frame(void)
     assert(frame.data[7] == 0x0A);
 }
 
-static void test_status_parse(void)
+static void test_origin_frames(void)
 {
-    Jc4010MotorState m1 = {0};
-    Jc4010MotorState m2 = {0};
-    uint8_t data[8] = {0x2A, 0x00, 0x8C, 0xA0, 0x00, 0xC8, 0x00, 0x64};
+    MotorCanFrame frame;
 
-    assert(jc4010_parse_status(0x581, data, &m1, &m2) == 1);
-    assert((int)m1.position_deg == 360);
-    assert((int)m1.speed_rpm == 2);
-    assert((int)m1.current_a == 1);
+    motor_build_set_origin(3, &frame);
+    assert(frame.id == 0x603);
+    assert(frame.data[0] == 0x2B);
+    assert(frame.data[1] == 0x00);
+    assert(frame.data[2] == 0xA6);
+    assert(frame.data[4] == 0x00);
+    assert(frame.data[5] == 0x01);
+
+    motor_build_set_temporary_origin(4, &frame);
+    assert(frame.id == 0x604);
+    assert(frame.data[0] == 0x2B);
+    assert(frame.data[1] == 0x00);
+    assert(frame.data[2] == 0xA7);
+    assert(frame.data[4] == 0x00);
+    assert(frame.data[5] == 0x01);
 }
 
 int main(void)
 {
     test_pvt_frame();
     test_known_linux_cansend_frame();
-    test_status_parse();
-    printf("jc4010 can protocol tests passed\n");
+    test_origin_frames();
+    printf("motor CAN protocol tests passed\n");
     return 0;
 }

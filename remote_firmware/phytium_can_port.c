@@ -135,7 +135,7 @@ int phytium_can_init(void)
     return 0;
 }
 
-int phytium_can_send(const Jc4010CanFrame *frame)
+int phytium_can_send(const MotorCanFrame *frame)
 {
     FError ret;
     FCanFrame send_frame;
@@ -226,7 +226,7 @@ int phytium_can_init(void)
     return -98;
 }
 
-int phytium_can_send(const Jc4010CanFrame *frame)
+int phytium_can_send(const MotorCanFrame *frame)
 {
     if (frame) {
         g_can_debug.last_frame_id = frame->id;
