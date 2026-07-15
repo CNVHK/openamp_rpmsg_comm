@@ -25,7 +25,8 @@ typedef enum {
     CMD_IMU_READ = 41,
     CMD_BALANCE_ENABLE = 50,
     CMD_BALANCE_DISABLE = 51,
-    CMD_BALANCE_STATUS = 52
+    CMD_BALANCE_STATUS = 52,
+    CMD_BALANCE_SET_ZERO = 53
 } CommandType;
 
 typedef struct {

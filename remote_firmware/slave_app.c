@@ -27,6 +27,7 @@ typedef struct {
 } SlaveControlState;
 
 static SlaveControlState g_state;
+static uint8_t g_last_command_type;
 
 static int send_motor_frame(const MotorCanFrame *frame)
 {
@@ -237,6 +238,8 @@ static size_t build_ack(uint8_t seq, uint8_t *out, size_t out_size)
     const PhytiumServoDebugState *servo_dbg = phytium_servo_get_debug_state();
     const PhytiumBmi088DebugState *imu_dbg = phytium_bmi088_get_debug_state();
     const BalanceTelemetry *balance = balance_control_get_telemetry();
+    MotorFeedback left_feedback;
+    MotorFeedback right_feedback;
     uint8_t payload[120];
     memset(payload, 0, sizeof(payload));
 
@@ -272,8 +275,20 @@ static size_t build_ack(uint8_t seq, uint8_t *out, size_t out_size)
     for (int i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
         write_be_u16(&payload[52 + i * 2], servo_dbg->angle_deg[i]);
     }
-    for (int i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
-        write_be_u16(&payload[80 + i * 2], servo_dbg->pulse_us[i]);
+    if (g_last_command_type >= CMD_BALANCE_ENABLE &&
+        g_last_command_type <= CMD_BALANCE_SET_ZERO) {
+        if (phytium_can_get_motor_feedback(1U, &left_feedback) == 0) {
+            write_be_u16(&payload[80], (uint16_t)left_feedback.current_x100_a);
+            write_be_u16(&payload[84], (uint16_t)left_feedback.speed_rpm);
+        }
+        if (phytium_can_get_motor_feedback(2U, &right_feedback) == 0) {
+            write_be_u16(&payload[82], (uint16_t)right_feedback.current_x100_a);
+            write_be_u16(&payload[86], (uint16_t)right_feedback.speed_rpm);
+        }
+    } else {
+        for (int i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
+            write_be_u16(&payload[80 + i * 2], servo_dbg->pulse_us[i]);
+        }
     }
     payload[60] = (uint8_t)imu_dbg->init_ret;
     payload[61] = (uint8_t)imu_dbg->last_ret;
@@ -320,6 +335,7 @@ size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply,
     if (!rpmsg_decode(data, len, &frame)) {
         return 0;
     }
+    g_last_command_type = frame.type;
 
     switch (frame.type) {
     case CMD_HEARTBEAT:
@@ -370,6 +386,9 @@ size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply,
         balance_control_disable();
         return build_ack(frame.seq, reply, reply_size);
     case CMD_BALANCE_STATUS:
+        return build_ack(frame.seq, reply, reply_size);
+    case CMD_BALANCE_SET_ZERO:
+        (void)balance_control_set_zero();
         return build_ack(frame.seq, reply, reply_size);
     case CMD_CAN_ZERO_POSITION:
         if (frame.length >= 1) {

@@ -29,6 +29,8 @@ static uint64_t g_timer_frequency;
 static uint64_t g_period_ticks;
 static uint64_t g_next_tick;
 static uint64_t g_arm_tick;
+static float g_pitch_reference_rad;
+static uint8_t g_pitch_reference_valid;
 static uint8_t g_initialized;
 
 static uint64_t ms_to_ticks(uint32_t milliseconds)
@@ -134,7 +136,7 @@ int balance_control_init(void)
         .k_position = -1.414213562f,
         .k_velocity = -5.829463511f,
         .wheel_radius_m = 0.03225f,
-        .torque_limit_nm = 0.10f,
+        .torque_limit_nm = 0.22f,
         .fall_angle_rad = 15.0f * BALANCE_PI / 180.0f,
         .pitch_offset_rad = 0.0f,
         .left_motor_direction = 1.0f,
@@ -142,6 +144,8 @@ int balance_control_init(void)
     };
 
     memset(&g_telemetry, 0, sizeof(g_telemetry));
+    g_pitch_reference_rad = 0.0f;
+    g_pitch_reference_valid = 0U;
     g_telemetry.state = BALANCE_STATE_DISABLED;
     g_telemetry.control_hz = BALANCE_CONTROL_HZ;
     g_timer_frequency = GenericTimerFrequecy();
@@ -163,6 +167,37 @@ int balance_control_init(void)
     return 0;
 }
 
+int balance_control_set_zero(void)
+{
+    PhytiumBmi088Sample imu;
+    uint64_t now;
+
+    if (!g_initialized || g_telemetry.state == BALANCE_STATE_ACTIVE ||
+        g_telemetry.state == BALANCE_STATE_ARMING) {
+        return -1;
+    }
+    now = GenericTimerRead(GENERIC_TIMER_ID0);
+    if (phytium_bmi088_get_sample(&imu) != 0 || !imu.valid ||
+        now - imu.update_tick > ms_to_ticks(30U) ||
+        !isfinite(imu.pitch_rad) || !isfinite(imu.pitch_rate_rad_s) ||
+        fabsf(imu.pitch_rate_rad_s) > BALANCE_ARM_MAX_PITCH_RATE_RAD_S) {
+        enter_fault(BALANCE_FAULT_ARM_CONDITION);
+        return -1;
+    }
+
+    g_pitch_reference_rad = imu.pitch_rad;
+    g_pitch_reference_valid = 1U;
+    lqr_disable(&g_lqr);
+    stop_motors(1U);
+    g_telemetry.state = BALANCE_STATE_DISABLED;
+    g_telemetry.fault = BALANCE_FAULT_NONE;
+    g_telemetry.pitch_rad = 0.0f;
+    g_telemetry.pitch_rate_rad_s = imu.pitch_rate_rad_s;
+    g_telemetry.left_torque_nm = 0.0f;
+    g_telemetry.right_torque_nm = 0.0f;
+    return 0;
+}
+
 int balance_control_enable(void)
 {
     MotorCanFrame frame;
@@ -170,6 +205,10 @@ int balance_control_enable(void)
 
     if (!g_initialized || g_telemetry.state == BALANCE_STATE_ACTIVE ||
         g_telemetry.state == BALANCE_STATE_ARMING) {
+        return -1;
+    }
+    if (!g_pitch_reference_valid) {
+        enter_fault(BALANCE_FAULT_CONFIG);
         return -1;
     }
 
@@ -260,7 +299,8 @@ void balance_control_poll(void)
         (void)send_torque(BALANCE_LEFT_MOTOR_ID, 0.0f);
         (void)send_torque(BALANCE_RIGHT_MOTOR_ID, 0.0f);
         if (read_lqr_sensor(now, &sensor, &fault) == 0) {
-            if (fabsf(sensor.pitch_rad) > BALANCE_ARM_MAX_PITCH_RAD ||
+            if (fabsf(sensor.pitch_rad - g_pitch_reference_rad) >
+                    BALANCE_ARM_MAX_PITCH_RAD ||
                 fabsf(sensor.pitch_rate_rad_s) >
                     BALANCE_ARM_MAX_PITCH_RATE_RAD_S ||
                 fabsf(sensor.left_velocity_rad_s * g_lqr.config.wheel_radius_m) >
@@ -270,7 +310,7 @@ void balance_control_poll(void)
                 enter_fault(BALANCE_FAULT_ARM_CONDITION);
                 return;
             }
-            g_lqr.config.pitch_offset_rad = sensor.pitch_rad;
+            g_lqr.config.pitch_offset_rad = g_pitch_reference_rad;
             if (lqr_enable(&g_lqr, &sensor) == 0) {
                 g_telemetry.state = BALANCE_STATE_ACTIVE;
                 return;
