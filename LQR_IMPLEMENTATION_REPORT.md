@@ -54,6 +54,8 @@
 
 对 `balance-enable` / `balance-disable` / `balance-status` 的 ACK，原 servo PWM 调试字段临时复用为左右电机反馈电流和原始 rpm，主核客户端输出 `motor feedback`。
 
+新增 `torque-test <motor_id> <torque_nm> [duration_ms]` 执行器独立诊断。该命令只在平衡环非 active/arming 时执行，力矩限制为 ±0.22 N·m，时间限制为 20–500 ms，结束后自动发送零力矩并进入 idle。ACK 返回测试期间的峰值反馈电流和带符号峰值 rpm。
+
 启用时要求车身俯仰角相对固定直立目标不超过 5°、俯仰角速度不超过 0.15 rad/s，且任一轮线速度绝对值不超过 0.10 m/s，否则拒绝进入 active。active 状态下平均轮速绝对值超过 1.0 m/s 时立即进入故障并下发零力矩和 idle。
 
 控制频率当前设为 100 Hz，因为 BMI088 现有加速度计和陀螺仪配置均为 100 Hz。提升到 500 Hz 前必须先同步修改 IMU ODR、滤波带宽和超时阈值。

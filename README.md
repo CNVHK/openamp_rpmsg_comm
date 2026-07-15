@@ -82,6 +82,7 @@ sudo ./rpmsg_client /dev/rpmsg0 heartbeat
 sudo ./rpmsg_client /dev/rpmsg0 enable 1
 sudo ./rpmsg_client /dev/rpmsg0 zero 1
 sudo ./rpmsg_client /dev/rpmsg0 test
+sudo ./rpmsg_client /dev/rpmsg0 torque-test 1 0.05 200
 sudo ./rpmsg_client /dev/rpmsg0 pvt 1 1000 100 20
 sudo ./rpmsg_client /dev/rpmsg0 stop 1
 ```
@@ -109,6 +110,8 @@ sudo ./rpmsg_client /dev/rpmsg0 stop 1
 ```bash
 make gimbal
 ```
+
+`torque-test` 仅用于排查 ID 1/2 轮电机的力矩模式。力矩范围为 -0.22–0.22 N·m，脉冲时间为 20–500 ms；命令结束后会自动发送零力矩并进入 idle。
 
 首次安装时，先卸载负载或架空云台，并手动把 yaw、pitch 放到机械中位。确认位置无误后执行永久标零：
 

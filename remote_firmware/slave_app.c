@@ -28,6 +28,8 @@ typedef struct {
 
 static SlaveControlState g_state;
 static uint8_t g_last_command_type;
+static int16_t g_torque_test_peak_current_x100[2];
+static int16_t g_torque_test_peak_speed_rpm[2];
 
 static int send_motor_frame(const MotorCanFrame *frame)
 {
@@ -275,7 +277,16 @@ static size_t build_ack(uint8_t seq, uint8_t *out, size_t out_size)
     for (int i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
         write_be_u16(&payload[52 + i * 2], servo_dbg->angle_deg[i]);
     }
-    if (g_last_command_type >= CMD_BALANCE_ENABLE &&
+    if (g_last_command_type == CMD_CAN_TORQUE_TEST) {
+        write_be_u16(&payload[80],
+                     (uint16_t)g_torque_test_peak_current_x100[0]);
+        write_be_u16(&payload[82],
+                     (uint16_t)g_torque_test_peak_current_x100[1]);
+        write_be_u16(&payload[84],
+                     (uint16_t)g_torque_test_peak_speed_rpm[0]);
+        write_be_u16(&payload[86],
+                     (uint16_t)g_torque_test_peak_speed_rpm[1]);
+    } else if (g_last_command_type >= CMD_BALANCE_ENABLE &&
         g_last_command_type <= CMD_BALANCE_STATUS) {
         if (phytium_can_get_motor_feedback(1U, &left_feedback) == 0) {
             write_be_u16(&payload[80], (uint16_t)left_feedback.current_x100_a);
@@ -312,6 +323,95 @@ static size_t build_ack(uint8_t seq, uint8_t *out, size_t out_size)
     write_be_u32(&payload[116], balance->loop_count);
 
     return rpmsg_encode(CMD_HEARTBEAT, seq, payload, sizeof(payload), out, out_size);
+}
+
+static void update_torque_test_peak(uint8_t motor_id)
+{
+    MotorFeedback feedback;
+    int index = (int)motor_id - 1;
+    int current_abs;
+    int peak_current_abs;
+    int speed_abs;
+    int peak_speed_abs;
+
+    if (index < 0 || index >= 2 ||
+        phytium_can_get_motor_feedback(motor_id, &feedback) != 0) {
+        return;
+    }
+    current_abs = feedback.current_x100_a < 0 ?
+        -(int)feedback.current_x100_a : (int)feedback.current_x100_a;
+    peak_current_abs = g_torque_test_peak_current_x100[index] < 0 ?
+        -(int)g_torque_test_peak_current_x100[index] :
+        (int)g_torque_test_peak_current_x100[index];
+    if (current_abs > peak_current_abs) {
+        g_torque_test_peak_current_x100[index] = feedback.current_x100_a;
+    }
+    speed_abs = feedback.speed_rpm < 0 ?
+        -(int)feedback.speed_rpm : (int)feedback.speed_rpm;
+    peak_speed_abs = g_torque_test_peak_speed_rpm[index] < 0 ?
+        -(int)g_torque_test_peak_speed_rpm[index] :
+        (int)g_torque_test_peak_speed_rpm[index];
+    if (speed_abs > peak_speed_abs) {
+        g_torque_test_peak_speed_rpm[index] = feedback.speed_rpm;
+    }
+}
+
+static void handle_can_torque_test(const uint8_t *payload, uint8_t length)
+{
+    const BalanceTelemetry *balance = balance_control_get_telemetry();
+    MotorCanFrame can_frame;
+    uint8_t motor_id;
+    int16_t torque_x100_nm;
+    uint16_t duration_ms;
+
+    if (length < 5U || balance->state == BALANCE_STATE_ACTIVE ||
+        balance->state == BALANCE_STATE_ARMING) {
+        return;
+    }
+    motor_id = payload[0];
+    torque_x100_nm = (int16_t)read_be_u16(&payload[1]);
+    duration_ms = read_be_u16(&payload[3]);
+    if (motor_id < 1U || motor_id > 2U || torque_x100_nm < -22 ||
+        torque_x100_nm > 22 || duration_ms < 20U || duration_ms > 500U) {
+        return;
+    }
+
+    balance_control_disable();
+    memset(g_torque_test_peak_current_x100, 0,
+           sizeof(g_torque_test_peak_current_x100));
+    memset(g_torque_test_peak_speed_rpm, 0,
+           sizeof(g_torque_test_peak_speed_rpm));
+    motor_build_set_mode(motor_id, 0U, &can_frame);
+    if (send_motor_frame(&can_frame) != 0) {
+        return;
+    }
+    fsleep_millisec(5U);
+    motor_build_enable(motor_id, &can_frame);
+    if (send_motor_frame(&can_frame) != 0) {
+        return;
+    }
+    fsleep_millisec(5U);
+
+    for (uint16_t elapsed = 0U; elapsed < duration_ms; elapsed += 10U) {
+        uint32_t feedback_count_before =
+            phytium_can_get_debug_state()->feedback_count;
+        motor_build_torque(motor_id, torque_x100_nm, &can_frame);
+        if (send_motor_frame(&can_frame) != 0) {
+            break;
+        }
+        fsleep_millisec(2U);
+        (void)phytium_can_poll();
+        if (phytium_can_get_debug_state()->feedback_count !=
+            feedback_count_before) {
+            update_torque_test_peak(motor_id);
+        }
+        fsleep_millisec(8U);
+    }
+    motor_build_torque(motor_id, 0, &can_frame);
+    (void)send_motor_frame(&can_frame);
+    fsleep_millisec(5U);
+    motor_build_idle(motor_id, &can_frame);
+    (void)send_motor_frame(&can_frame);
 }
 
 int slave_app_init(void)
@@ -358,6 +458,9 @@ size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply,
         return build_ack(frame.seq, reply, reply_size);
     case CMD_MOTOR_TEST:
         handle_motor_test();
+        return build_ack(frame.seq, reply, reply_size);
+    case CMD_CAN_TORQUE_TEST:
+        handle_can_torque_test(frame.payload, frame.length);
         return build_ack(frame.seq, reply, reply_size);
     case CMD_CAN_SET_ORIGIN:
         if (frame.length >= 1) {

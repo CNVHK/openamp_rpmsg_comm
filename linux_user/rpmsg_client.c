@@ -1,6 +1,7 @@
 #include "../src/rpmsg_protocol.h"
 
 #include <fcntl.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,7 +9,7 @@
 #include <sys/select.h>
 #include <unistd.h>
 
-#define RPMSG_CLIENT_VERSION "0.12.0-lqr"
+#define RPMSG_CLIENT_VERSION "0.13.0-lqr"
 
 static int wait_readable(int fd, int timeout_ms)
 {
@@ -64,6 +65,7 @@ static void usage(const char *prog)
     printf("  %s <rpmsg_dev> mode <motor_id> <mode>\n", prog);
     printf("  %s <rpmsg_dev> init <motor_id>\n", prog);
     printf("  %s <rpmsg_dev> test\n", prog);
+    printf("  %s <rpmsg_dev> torque-test <motor_id> <torque_nm> [duration_ms]\n", prog);
     printf("  %s <rpmsg_dev> servo <s0_deg> <s1_deg> <s2_deg> <s3_deg>\n", prog);
     printf("  %s <rpmsg_dev> servopol <0..7>\n", prog);
     printf("  %s <rpmsg_dev> servocenter\n", prog);
@@ -148,6 +150,42 @@ static int build_command(int argc, char **argv, uint8_t *type, uint8_t *payload,
     if (strcmp(cmd, "test") == 0) {
         *type = CMD_MOTOR_TEST;
         *payload_len = 0;
+        return 0;
+    }
+
+    if (strcmp(cmd, "torque-test") == 0) {
+        char *end = NULL;
+        unsigned long motor_id;
+        unsigned long duration_ms = 200U;
+        float torque_nm;
+        int16_t torque_x100;
+
+        if (argc < 5) return -1;
+        motor_id = strtoul(argv[3], &end, 0);
+        if (end == argv[3] || *end != '\0' || motor_id < 1U || motor_id > 2U) {
+            return -1;
+        }
+        end = NULL;
+        torque_nm = strtof(argv[4], &end);
+        if (end == argv[4] || *end != '\0' || !isfinite(torque_nm) ||
+            torque_nm < -0.22f || torque_nm > 0.22f) {
+            return -1;
+        }
+        if (argc >= 6) {
+            end = NULL;
+            duration_ms = strtoul(argv[5], &end, 0);
+            if (end == argv[5] || *end != '\0' ||
+                duration_ms < 20U || duration_ms > 500U) {
+                return -1;
+            }
+        }
+        torque_x100 = (int16_t)(torque_nm >= 0.0f ?
+            torque_nm * 100.0f + 0.5f : torque_nm * 100.0f - 0.5f);
+        *type = CMD_CAN_TORQUE_TEST;
+        payload[0] = (uint8_t)motor_id;
+        put_be_u16(&payload[1], (uint16_t)torque_x100);
+        put_be_u16(&payload[3], (uint16_t)duration_ms);
+        *payload_len = 5U;
         return 0;
     }
 
@@ -364,14 +402,16 @@ int main(int argc, char **argv)
                servo_angle[1],
                servo_angle[2],
                servo_angle[3]);
-        if (ack.length >= 88 && type >= CMD_BALANCE_ENABLE &&
-            type <= CMD_BALANCE_STATUS) {
+        if (ack.length >= 88 &&
+            (type == CMD_CAN_TORQUE_TEST ||
+             (type >= CMD_BALANCE_ENABLE && type <= CMD_BALANCE_STATUS))) {
             int16_t left_current_x100 = (int16_t)read_be_u16(&ack.payload[80]);
             int16_t right_current_x100 = (int16_t)read_be_u16(&ack.payload[82]);
             int16_t left_speed_rpm = (int16_t)read_be_u16(&ack.payload[84]);
             int16_t right_speed_rpm = (int16_t)read_be_u16(&ack.payload[86]);
 
-            printf("motor feedback: current=%.2f,%.2f A speed=%d,%d rpm\n",
+            printf("motor feedback%s: current=%.2f,%.2f A speed=%d,%d rpm\n",
+                   type == CMD_CAN_TORQUE_TEST ? " peak" : "",
                    (double)left_current_x100 / 100.0,
                    (double)right_current_x100 / 100.0,
                    left_speed_rpm, right_speed_rpm);
