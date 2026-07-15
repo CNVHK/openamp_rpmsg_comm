@@ -242,6 +242,7 @@ void balance_control_poll(void)
         }
         return;
     }
+    now = GenericTimerRead(GENERIC_TIMER_ID0);
     if (g_telemetry.state == BALANCE_STATE_DISABLED ||
         g_telemetry.state == BALANCE_STATE_FAULT) {
         return;

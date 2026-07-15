@@ -10,6 +10,7 @@ typedef struct {
     uint32_t baudrate;
     uint32_t send_count;
     uint32_t receive_count;
+    uint32_t feedback_count;
     int last_receive_ret;
     uint32_t last_frame_id;
     uint8_t last_frame_dlc;

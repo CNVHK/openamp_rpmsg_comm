@@ -73,6 +73,7 @@ int phytium_can_init(void)
 {
     FError ret;
     FCanBaudrateConfig arb_segment_config;
+    FCanIdMaskConfig id_mask;
 
     if (g_can_ready) {
         g_can_debug.init_ret = 0;
@@ -128,6 +129,21 @@ int phytium_can_init(void)
         return -2;
     }
     printf("phytium_can_init: FCanBaudrateSet arb ok\r\n");
+
+    memset(&id_mask, 0, sizeof(id_mask));
+    for (int i = 0; i < FCAN_ACC_ID_REG_NUM; ++i) {
+        id_mask.filter_index = i;
+        id_mask.id = 0U;
+        id_mask.mask = FCAN_ACC_IDN_MASK;
+        id_mask.type = STANDARD_FRAME;
+        ret = FCanIdMaskFilterSet(&g_can, &id_mask);
+        if (ret != FCAN_SUCCESS) {
+            g_can_debug.init_ret = -3;
+            printf("phytium_can_init: filter setup failed ret=%d\r\n", ret);
+            return -3;
+        }
+    }
+    FCanIdMaskFilterEnable(&g_can);
 
     FCanEnable(&g_can, TRUE);
     printf("phytium_can_init: FCanEnable done\r\n");
@@ -212,6 +228,7 @@ int phytium_can_poll(void)
             feedback.motor_id < (uint8_t)(sizeof(g_motor_feedback) / sizeof(g_motor_feedback[0]))) {
             feedback.update_tick = GenericTimerRead(GENERIC_TIMER_ID0);
             g_motor_feedback[feedback.motor_id] = feedback;
+            g_can_debug.feedback_count++;
         }
         received++;
         g_can_debug.receive_count++;

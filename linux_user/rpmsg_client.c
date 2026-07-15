@@ -300,8 +300,9 @@ int main(int argc, char **argv)
 
     printf("ack type=%u seq=%u payload_len=%u\n", ack.type, ack.seq, ack.length);
     if (ack.length >= 4) {
-        printf("remote state: heartbeat_ok=%u last_can_ret=%d\n",
-               ack.payload[2], (int8_t)ack.payload[3]);
+        printf("remote state: heartbeat_ok=%u last_can_ret=%d can_rx=%u feedback=%u\n",
+               ack.payload[2], (int8_t)ack.payload[3],
+               ack.payload[0], ack.payload[1]);
     }
 
     if (ack.length >= 26) {

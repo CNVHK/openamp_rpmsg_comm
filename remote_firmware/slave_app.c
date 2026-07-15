@@ -240,6 +240,8 @@ static size_t build_ack(uint8_t seq, uint8_t *out, size_t out_size)
     uint8_t payload[120];
     memset(payload, 0, sizeof(payload));
 
+    payload[0] = (uint8_t)can_dbg->receive_count;
+    payload[1] = (uint8_t)can_dbg->feedback_count;
     payload[2] = g_state.heartbeat_ok;
     payload[3] = (uint8_t)g_state.last_can_ret;
     payload[4] = (uint8_t)can_dbg->init_ret;
