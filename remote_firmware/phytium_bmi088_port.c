@@ -8,8 +8,10 @@
 #include "fsleep.h"
 #include "fspim.h"
 #include "fgpio.h"
+#include "fgeneric_timer.h"
 #include "ftypes.h"
 
+#include <math.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -68,6 +70,16 @@
 #define BMI088_GYRO_BW_100HZ_32HZ 0x07U
 #define BMI088_GYRO_RANGE_1000DPS 0x01U
 
+#define BMI088_GRAVITY_M_S2 9.80665f
+#define BMI088_PI 3.14159265358979323846f
+#define BMI088_ACCEL_SCALE (6.0f * BMI088_GRAVITY_M_S2 / 32768.0f)
+#define BMI088_GYRO_SCALE (1000.0f * BMI088_PI / 180.0f / 32768.0f)
+#define BMI088_COMPLEMENTARY_ALPHA 0.98f
+
+#ifndef PHYTIUM_BMI088_PITCH_DIRECTION
+#define PHYTIUM_BMI088_PITCH_DIRECTION 1.0f
+#endif
+
 typedef enum {
     BMI088_DEV_ACCEL = 0,
     BMI088_DEV_GYRO = 1
@@ -77,6 +89,8 @@ static FSpim g_spim;
 static FGpio g_accel_cs;
 static FGpio g_gyro_cs;
 static uint8_t g_ready;
+static PhytiumBmi088Sample g_sample;
+static float g_gyro_pitch_bias;
 static PhytiumBmi088DebugState g_dbg = {
     .init_ret = -99,
     .last_ret = -99,
@@ -299,6 +313,77 @@ int phytium_bmi088_read_sample(void)
     return 0;
 }
 
+int phytium_bmi088_calibrate_gyro(uint16_t sample_count)
+{
+    float sum = 0.0f;
+
+    if (sample_count == 0U) {
+        return -1;
+    }
+
+    memset(&g_sample, 0, sizeof(g_sample));
+    for (uint16_t i = 0; i < sample_count; ++i) {
+        int ret = phytium_bmi088_read_sample();
+        if (ret != 0) {
+            return ret;
+        }
+        sum += (float)g_dbg.gyro_raw[1] * BMI088_GYRO_SCALE;
+        fsleep_millisec(10);
+    }
+
+    g_gyro_pitch_bias = sum / (float)sample_count;
+    g_sample.calibrated = 1U;
+    return 0;
+}
+
+int phytium_bmi088_update(float dt_s)
+{
+    float pitch_acc;
+    float pitch_gyro;
+    uint8_t was_valid = g_sample.valid;
+    uint8_t was_calibrated = g_sample.calibrated;
+    int ret;
+
+    if (!(dt_s > 0.0f) || dt_s > 0.1f) {
+        return -1;
+    }
+
+    ret = phytium_bmi088_read_sample();
+    if (ret != 0) {
+        g_sample.valid = 0U;
+        return ret;
+    }
+
+    for (int i = 0; i < 3; ++i) {
+        g_sample.accel_m_s2[i] = (float)g_dbg.accel_raw[i] * BMI088_ACCEL_SCALE;
+        g_sample.gyro_rad_s[i] = (float)g_dbg.gyro_raw[i] * BMI088_GYRO_SCALE;
+    }
+
+    g_sample.pitch_rate_rad_s = PHYTIUM_BMI088_PITCH_DIRECTION *
+                                (g_sample.gyro_rad_s[1] - g_gyro_pitch_bias);
+    pitch_acc = PHYTIUM_BMI088_PITCH_DIRECTION *
+                atan2f(-g_sample.accel_m_s2[0],
+                       sqrtf(g_sample.accel_m_s2[1] * g_sample.accel_m_s2[1] +
+                             g_sample.accel_m_s2[2] * g_sample.accel_m_s2[2]));
+    pitch_gyro = g_sample.pitch_rad + g_sample.pitch_rate_rad_s * dt_s;
+    g_sample.pitch_rad = was_valid ?
+        BMI088_COMPLEMENTARY_ALPHA * pitch_gyro +
+        (1.0f - BMI088_COMPLEMENTARY_ALPHA) * pitch_acc : pitch_acc;
+    g_sample.update_tick = GenericTimerRead(GENERIC_TIMER_ID0);
+    g_sample.calibrated = was_calibrated;
+    g_sample.valid = 1U;
+    return 0;
+}
+
+int phytium_bmi088_get_sample(PhytiumBmi088Sample *sample)
+{
+    if (sample == NULL || !g_sample.valid) {
+        return -1;
+    }
+    *sample = g_sample;
+    return 0;
+}
+
 const PhytiumBmi088DebugState *phytium_bmi088_get_debug_state(void)
 {
     return &g_dbg;
@@ -321,6 +406,24 @@ int phytium_bmi088_init(void)
 int phytium_bmi088_read_sample(void)
 {
     g_dbg.last_ret = -98;
+    return -98;
+}
+
+int phytium_bmi088_calibrate_gyro(uint16_t sample_count)
+{
+    (void)sample_count;
+    return -98;
+}
+
+int phytium_bmi088_update(float dt_s)
+{
+    (void)dt_s;
+    return -98;
+}
+
+int phytium_bmi088_get_sample(PhytiumBmi088Sample *sample)
+{
+    (void)sample;
     return -98;
 }
 

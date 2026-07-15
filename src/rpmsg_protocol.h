@@ -6,26 +6,26 @@
 #include <stdbool.h>
 
 #define RPMSG_FRAME_MAGIC 0xA5
-#define RPMSG_MAX_PAYLOAD 88
+#define RPMSG_MAX_PAYLOAD 120
 
 typedef enum {
     CMD_HEARTBEAT = 1,
-    CMD_SET_MOTOR = 2,
-    CMD_READ_IMU = 3,
-    CMD_SAFE_STOP = 4,
     CMD_CAN_ENABLE = 10,
     CMD_CAN_ZERO_POSITION = 11,
     CMD_CAN_PVT = 12,
     CMD_CAN_SAFE_STOP = 13,
     CMD_CAN_SET_MODE = 14,
     CMD_CAN_INIT_MOTOR = 15,
-    CMD_CAN_G431_INIT = 16,
-    CMD_CAN_G431_DEMO = 17,
+    CMD_MOTOR_TEST = 16,
+    CMD_CAN_SET_ORIGIN = 17,
     CMD_SERVO_SET4 = 30,
     CMD_SERVO_CENTER = 31,
     CMD_SERVO_POLARITY = 32,
     CMD_IMU_INIT = 40,
-    CMD_IMU_READ = 41
+    CMD_IMU_READ = 41,
+    CMD_BALANCE_ENABLE = 50,
+    CMD_BALANCE_DISABLE = 51,
+    CMD_BALANCE_STATUS = 52
 } CommandType;
 
 typedef struct {

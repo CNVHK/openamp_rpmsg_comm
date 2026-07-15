@@ -10,39 +10,25 @@
  * OpenAMP rpmsg callback and compiled into openamp_core0.elf.
  */
 
-#include "../src/rpmsg_protocol.h"
-#include "jc4010_can.h"
+#include "rpmsg_protocol.h"
+#include "balance_controller.h"
+#include "motor_can.h"
 #include "phytium_bmi088_port.h"
 #include "phytium_can_port.h"
 #include "phytium_servo_port.h"
 #include "fsleep.h"
+#include <math.h>
 #include <stdint.h>
 #include <string.h>
 
 typedef struct {
-    int8_t motor_left;
-    int8_t motor_right;
     uint8_t heartbeat_ok;
     int8_t last_can_ret;
-    uint32_t bad_frame_count;
 } SlaveControlState;
 
 static SlaveControlState g_state;
 
-static void enter_safe_state(void)
-{
-    g_state.motor_left = 0;
-    g_state.motor_right = 0;
-}
-
-static void apply_motor_output(int8_t left, int8_t right)
-{
-    /* TODO: replace with Phytium GPIO/PWM driver calls after motor board is ready. */
-    g_state.motor_left = left;
-    g_state.motor_right = right;
-}
-
-static int send_jc4010_frame(const Jc4010CanFrame *frame)
+static int send_motor_frame(const MotorCanFrame *frame)
 {
     int ret = phytium_can_send(frame);
     g_state.last_can_ret = (int8_t)ret;
@@ -120,43 +106,64 @@ static void handle_imu_read(void)
 
 static void handle_can_enable(uint8_t motor_id)
 {
-    Jc4010CanFrame can_frame;
-    jc4010_build_enable(motor_id, &can_frame);
-    send_jc4010_frame(&can_frame);
-}
-
-static void handle_can_clear_fault(uint8_t motor_id)
-{
-    Jc4010CanFrame can_frame;
-    jc4010_build_clear_fault(motor_id, &can_frame);
-    send_jc4010_frame(&can_frame);
+    MotorCanFrame can_frame;
+    motor_build_enable(motor_id, &can_frame);
+    send_motor_frame(&can_frame);
 }
 
 static void handle_can_set_mode(uint8_t motor_id, uint16_t mode)
 {
-    Jc4010CanFrame can_frame;
-    jc4010_build_set_mode(motor_id, mode, &can_frame);
-    send_jc4010_frame(&can_frame);
+    MotorCanFrame can_frame;
+    motor_build_set_mode(motor_id, mode, &can_frame);
+    send_motor_frame(&can_frame);
 }
 
-static void handle_can_zero(uint8_t motor_id)
+static void handle_can_temporary_origin(uint8_t motor_id)
 {
-    Jc4010CanFrame can_frame;
-    jc4010_build_zero_position(motor_id, &can_frame);
-    send_jc4010_frame(&can_frame);
+    MotorCanFrame can_frame;
+    motor_build_set_temporary_origin(motor_id, &can_frame);
+    send_motor_frame(&can_frame);
+}
+
+static void write_be_i32(uint8_t *p, int32_t value)
+{
+    write_be_u32(p, (uint32_t)value);
+}
+
+static int32_t float_to_i32(float value, float scale)
+{
+    float scaled;
+
+    if (!isfinite(value)) {
+        return 0;
+    }
+    scaled = value * scale;
+    if (scaled > 2147483647.0f) {
+        return INT32_MAX;
+    }
+    if (scaled < -2147483648.0f) {
+        return INT32_MIN;
+    }
+    return (int32_t)(scaled >= 0.0f ? scaled + 0.5f : scaled - 0.5f);
+}
+
+static void handle_can_set_origin(uint8_t motor_id)
+{
+    MotorCanFrame can_frame;
+    motor_build_set_origin(motor_id, &can_frame);
+    send_motor_frame(&can_frame);
 }
 
 static void handle_can_safe_stop(uint8_t motor_id)
 {
-    Jc4010CanFrame can_frame;
-    jc4010_build_safe_stop(motor_id, &can_frame);
-    send_jc4010_frame(&can_frame);
+    MotorCanFrame can_frame;
+    motor_build_safe_stop(motor_id, &can_frame);
+    send_motor_frame(&can_frame);
 }
 
 static void handle_can_pvt(const uint8_t *payload, uint8_t length)
 {
     if (length < 8) {
-        enter_safe_state();
         return;
     }
 
@@ -165,86 +172,63 @@ static void handle_can_pvt(const uint8_t *payload, uint8_t length)
     uint16_t speed_rpm = read_be_u16(&payload[5]);
     uint8_t torque_percent = payload[7];
 
-    Jc4010CanFrame can_frame;
-    jc4010_build_pvt(motor_id, position_x100_deg, speed_rpm, torque_percent, &can_frame);
-    send_jc4010_frame(&can_frame);
+    MotorCanFrame can_frame;
+    motor_build_pvt(motor_id, position_x100_deg, speed_rpm, torque_percent, &can_frame);
+    send_motor_frame(&can_frame);
 }
 
 static void handle_can_init_motor(uint8_t motor_id)
 {
-    Jc4010CanFrame can_frame;
+    MotorCanFrame can_frame;
 
-    /*
-     * Same command order as G431_CAN/Core/Src/main.c:
-     * 0x00A5=1, mode 0x0060=2, zero 0x00A7=1, enable 0x00A2=1.
-     */
-    jc4010_build_clear_fault(motor_id, &can_frame);
-    if (send_jc4010_frame(&can_frame) != 0) {
+    /* Keep the saved origin intact: select position mode, then enter closed loop. */
+    motor_build_set_mode(motor_id, 2, &can_frame);
+    if (send_motor_frame(&can_frame) != 0) {
         return;
     }
-    fsleep_millisec(20);
-    if (!phytium_can_bus_ok()) {
-        return;
-    }
-    fsleep_millisec(2000);
-    handle_can_set_mode(motor_id, 2);
     fsleep_millisec(10);
-    handle_can_zero(motor_id);
-    fsleep_millisec(10);
-    handle_can_enable(motor_id);
+    motor_build_enable(motor_id, &can_frame);
+    send_motor_frame(&can_frame);
     fsleep_millisec(10);
 }
 
-static void handle_can_g431_init(void)
+static int handle_motor_init_all(void)
 {
-    Jc4010CanFrame can_frame;
+    MotorCanFrame can_frame;
 
-    /*
-     * Match G431_CAN/Core/Src/main.c more closely:
-     * send the same setup command to motor 1 and 2, then wait once.
-     */
-    jc4010_build_clear_fault(1, &can_frame);
-    if (send_jc4010_frame(&can_frame) != 0) {
-        return;
+    motor_build_set_mode(1, 2, &can_frame);
+    if (send_motor_frame(&can_frame) != 0) {
+        return -1;
     }
-    jc4010_build_clear_fault(2, &can_frame);
-    if (send_jc4010_frame(&can_frame) != 0) {
-        return;
+    motor_build_set_mode(2, 2, &can_frame);
+    if (send_motor_frame(&can_frame) != 0) {
+        return -1;
     }
-    fsleep_millisec(20);
-    if (!phytium_can_bus_ok()) {
-        return;
-    }
-    fsleep_millisec(2000);
-
-    handle_can_set_mode(1, 2);
-    handle_can_set_mode(2, 2);
     fsleep_millisec(10);
 
-    handle_can_zero(1);
-    handle_can_zero(2);
+    motor_build_enable(1, &can_frame);
+    if (send_motor_frame(&can_frame) != 0) {
+        return -1;
+    }
+    motor_build_enable(2, &can_frame);
+    if (send_motor_frame(&can_frame) != 0) {
+        return -1;
+    }
     fsleep_millisec(10);
-
-    handle_can_enable(1);
-    handle_can_enable(2);
-    fsleep_millisec(10);
+    return 0;
 }
 
-static void handle_can_g431_demo(uint8_t state)
+static void handle_motor_test(void)
 {
-    Jc4010CanFrame can_frame;
+    MotorCanFrame can_frame;
 
-    if (state == 0) {
-        jc4010_build_pvt(1, 36000, 200, 50, &can_frame);
-        send_jc4010_frame(&can_frame);
-        jc4010_build_pvt(2, 9000, 200, 50, &can_frame);
-        send_jc4010_frame(&can_frame);
-    } else {
-        jc4010_build_pvt(1, 0, 200, 80, &can_frame);
-        send_jc4010_frame(&can_frame);
-        jc4010_build_pvt(2, 0, 200, 80, &can_frame);
-        send_jc4010_frame(&can_frame);
+    if (handle_motor_init_all() != 0) {
+        return;
     }
+    motor_build_pvt(1, 36000, 200, 50, &can_frame);
+    send_motor_frame(&can_frame);
+    motor_build_pvt(2, 36000, 200, 50, &can_frame);
+    send_motor_frame(&can_frame);
 }
 
 static size_t build_ack(uint8_t seq, uint8_t *out, size_t out_size)
@@ -252,11 +236,10 @@ static size_t build_ack(uint8_t seq, uint8_t *out, size_t out_size)
     const PhytiumCanDebugState *can_dbg = phytium_can_get_debug_state();
     const PhytiumServoDebugState *servo_dbg = phytium_servo_get_debug_state();
     const PhytiumBmi088DebugState *imu_dbg = phytium_bmi088_get_debug_state();
-    uint8_t payload[88];
+    const BalanceTelemetry *balance = balance_control_get_telemetry();
+    uint8_t payload[120];
     memset(payload, 0, sizeof(payload));
 
-    payload[0] = (uint8_t)g_state.motor_left;
-    payload[1] = (uint8_t)g_state.motor_right;
     payload[2] = g_state.heartbeat_ok;
     payload[3] = (uint8_t)g_state.last_can_ret;
     payload[4] = (uint8_t)can_dbg->init_ret;
@@ -300,29 +283,45 @@ static size_t build_ack(uint8_t seq, uint8_t *out, size_t out_size)
     }
     write_be_u32(&payload[76], imu_dbg->read_count);
 
-    return rpmsg_encode(CMD_HEARTBEAT, seq, payload, 88, out, out_size);
+    payload[88] = balance->state;
+    payload[89] = balance->fault;
+    write_be_u16(&payload[90], balance->control_hz);
+    write_be_i32(&payload[92], float_to_i32(balance->pitch_rad, 1000000.0f));
+    write_be_i32(&payload[96], float_to_i32(balance->pitch_rate_rad_s, 1000000.0f));
+    write_be_i32(&payload[100], float_to_i32(balance->wheel_position_m, 1000000.0f));
+    write_be_i32(&payload[104], float_to_i32(balance->wheel_velocity_m_s, 1000000.0f));
+    write_be_i32(&payload[108], float_to_i32(balance->left_torque_nm, 1000000.0f));
+    write_be_i32(&payload[112], float_to_i32(balance->right_torque_nm, 1000000.0f));
+    write_be_u32(&payload[116], balance->loop_count);
+
+    return rpmsg_encode(CMD_HEARTBEAT, seq, payload, sizeof(payload), out, out_size);
+}
+
+int slave_app_init(void)
+{
+    return balance_control_init();
+}
+
+void slave_app_poll(void)
+{
+    balance_control_poll();
+}
+
+void slave_app_shutdown(void)
+{
+    balance_control_disable();
 }
 
 size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply, size_t reply_size)
 {
     RpmsgFrame frame;
     if (!rpmsg_decode(data, len, &frame)) {
-        g_state.bad_frame_count++;
-        enter_safe_state();
         return 0;
     }
 
     switch (frame.type) {
     case CMD_HEARTBEAT:
         g_state.heartbeat_ok = 1;
-        return build_ack(frame.seq, reply, reply_size);
-    case CMD_SET_MOTOR:
-        if (frame.length >= 2) {
-            apply_motor_output((int8_t)frame.payload[0], (int8_t)frame.payload[1]);
-        }
-        return build_ack(frame.seq, reply, reply_size);
-    case CMD_SAFE_STOP:
-        enter_safe_state();
         return build_ack(frame.seq, reply, reply_size);
     case CMD_CAN_ENABLE:
         if (frame.length >= 1) {
@@ -339,11 +338,13 @@ size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply,
             handle_can_init_motor(frame.payload[0]);
         }
         return build_ack(frame.seq, reply, reply_size);
-    case CMD_CAN_G431_INIT:
-        handle_can_g431_init();
+    case CMD_MOTOR_TEST:
+        handle_motor_test();
         return build_ack(frame.seq, reply, reply_size);
-    case CMD_CAN_G431_DEMO:
-        handle_can_g431_demo(frame.length >= 1 ? frame.payload[0] : 0);
+    case CMD_CAN_SET_ORIGIN:
+        if (frame.length >= 1) {
+            handle_can_set_origin(frame.payload[0]);
+        }
         return build_ack(frame.seq, reply, reply_size);
     case CMD_SERVO_SET4:
         handle_servo_set4(frame.payload, frame.length);
@@ -360,9 +361,17 @@ size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply,
     case CMD_IMU_READ:
         handle_imu_read();
         return build_ack(frame.seq, reply, reply_size);
+    case CMD_BALANCE_ENABLE:
+        (void)balance_control_enable();
+        return build_ack(frame.seq, reply, reply_size);
+    case CMD_BALANCE_DISABLE:
+        balance_control_disable();
+        return build_ack(frame.seq, reply, reply_size);
+    case CMD_BALANCE_STATUS:
+        return build_ack(frame.seq, reply, reply_size);
     case CMD_CAN_ZERO_POSITION:
         if (frame.length >= 1) {
-            handle_can_zero(frame.payload[0]);
+            handle_can_temporary_origin(frame.payload[0]);
         }
         return build_ack(frame.seq, reply, reply_size);
     case CMD_CAN_PVT:
@@ -375,25 +384,8 @@ size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply,
             handle_can_safe_stop(1);
             handle_can_safe_stop(2);
         }
-        enter_safe_state();
         return build_ack(frame.seq, reply, reply_size);
     default:
-        enter_safe_state();
         return 0;
     }
 }
-
-/*
- * Real SDK callback shape reference:
- *
- * static int rpmsg_endpoint_cb(struct rpmsg_endpoint *ept, void *data,
- *                              size_t len, uint32_t src, void *priv)
- * {
- *     uint8_t reply[32];
- *     size_t reply_len = slave_handle_frame(data, len, reply, sizeof(reply));
- *     if (reply_len > 0) {
- *         rpmsg_send(ept, reply, reply_len);
- *     }
- *     return 0;
- * }
- */

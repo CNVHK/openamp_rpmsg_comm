@@ -13,8 +13,21 @@ typedef struct {
     uint32_t read_count;
 } PhytiumBmi088DebugState;
 
+typedef struct {
+    float accel_m_s2[3];
+    float gyro_rad_s[3];
+    float pitch_rad;
+    float pitch_rate_rad_s;
+    uint64_t update_tick;
+    uint8_t valid;
+    uint8_t calibrated;
+} PhytiumBmi088Sample;
+
 int phytium_bmi088_init(void);
 int phytium_bmi088_read_sample(void);
+int phytium_bmi088_calibrate_gyro(uint16_t sample_count);
+int phytium_bmi088_update(float dt_s);
+int phytium_bmi088_get_sample(PhytiumBmi088Sample *sample);
 const PhytiumBmi088DebugState *phytium_bmi088_get_debug_state(void);
 
 #endif

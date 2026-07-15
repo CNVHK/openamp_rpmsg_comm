@@ -8,7 +8,7 @@
 #include <sys/select.h>
 #include <unistd.h>
 
-#define RPMSG_CLIENT_VERSION "0.8.0-bmi088-spi"
+#define RPMSG_CLIENT_VERSION "0.11.0-lqr"
 
 static int wait_readable(int fd, int timeout_ms)
 {
@@ -44,6 +44,11 @@ static uint32_t read_be_u32(const uint8_t *p)
            (uint32_t)p[3];
 }
 
+static int32_t read_be_i32(const uint8_t *p)
+{
+    return (int32_t)read_be_u32(p);
+}
+
 static uint16_t read_be_u16(const uint8_t *p)
 {
     return (uint16_t)(((uint16_t)p[0] << 8) | p[1]);
@@ -55,29 +60,33 @@ static void usage(const char *prog)
     printf("  %s <rpmsg_dev> heartbeat\n", prog);
     printf("  %s <rpmsg_dev> enable <motor_id>\n", prog);
     printf("  %s <rpmsg_dev> zero <motor_id>\n", prog);
+    printf("  %s <rpmsg_dev> setorigin <motor_id>\n", prog);
     printf("  %s <rpmsg_dev> mode <motor_id> <mode>\n", prog);
     printf("  %s <rpmsg_dev> init <motor_id>\n", prog);
-    printf("  %s <rpmsg_dev> g431init\n", prog);
-    printf("  %s <rpmsg_dev> g431demo <0|1>\n", prog);
+    printf("  %s <rpmsg_dev> test\n", prog);
     printf("  %s <rpmsg_dev> servo <s0_deg> <s1_deg> <s2_deg> <s3_deg>\n", prog);
     printf("  %s <rpmsg_dev> servopol <0..7>\n", prog);
     printf("  %s <rpmsg_dev> servocenter\n", prog);
     printf("  %s <rpmsg_dev> imuinit\n", prog);
     printf("  %s <rpmsg_dev> imuread\n", prog);
+    printf("  %s <rpmsg_dev> balance-enable\n", prog);
+    printf("  %s <rpmsg_dev> balance-disable\n", prog);
+    printf("  %s <rpmsg_dev> balance-status\n", prog);
     printf("  %s <rpmsg_dev> pvt <motor_id> <pos_x100_deg> <speed_rpm> <torque_percent>\n", prog);
     printf("  %s <rpmsg_dev> stop [motor_id]\n", prog);
     printf("\nExamples:\n");
     printf("  %s /dev/rpmsg0 heartbeat\n", prog);
     printf("  %s /dev/rpmsg0 init 1\n", prog);
-    printf("  %s /dev/rpmsg0 g431init\n", prog);
-    printf("  %s /dev/rpmsg0 g431demo 0\n", prog);
-    printf("  %s /dev/rpmsg0 g431demo 1\n", prog);
+    printf("  %s /dev/rpmsg0 test\n", prog);
     printf("  %s /dev/rpmsg0 servo 90 90 90 90\n", prog);
     printf("  %s /dev/rpmsg0 servopol 4\n", prog);
     printf("  %s /dev/rpmsg0 servocenter\n", prog);
     printf("  %s /dev/rpmsg0 imuinit\n", prog);
     printf("  %s /dev/rpmsg0 imuread\n", prog);
     printf("  watch -n 0.1 '%s /dev/rpmsg0 imuread'\n", prog);
+    printf("  %s /dev/rpmsg0 balance-enable\n", prog);
+    printf("  watch -n 0.1 '%s /dev/rpmsg0 balance-status'\n", prog);
+    printf("  %s /dev/rpmsg0 balance-disable\n", prog);
     printf("  %s /dev/rpmsg0 enable 1\n", prog);
     printf("  %s /dev/rpmsg0 pvt 1 1000 100 20\n", prog);
     printf("  %s /dev/rpmsg0 stop 1\n", prog);
@@ -111,6 +120,14 @@ static int build_command(int argc, char **argv, uint8_t *type, uint8_t *payload,
         return 0;
     }
 
+    if (strcmp(cmd, "setorigin") == 0) {
+        if (argc < 4) return -1;
+        *type = CMD_CAN_SET_ORIGIN;
+        payload[0] = (uint8_t)strtoul(argv[3], NULL, 0);
+        *payload_len = 1;
+        return 0;
+    }
+
     if (strcmp(cmd, "mode") == 0) {
         if (argc < 5) return -1;
         *type = CMD_CAN_SET_MODE;
@@ -128,16 +145,9 @@ static int build_command(int argc, char **argv, uint8_t *type, uint8_t *payload,
         return 0;
     }
 
-    if (strcmp(cmd, "g431init") == 0) {
-        *type = CMD_CAN_G431_INIT;
+    if (strcmp(cmd, "test") == 0) {
+        *type = CMD_MOTOR_TEST;
         *payload_len = 0;
-        return 0;
-    }
-
-    if (strcmp(cmd, "g431demo") == 0) {
-        *type = CMD_CAN_G431_DEMO;
-        payload[0] = argc >= 4 ? (uint8_t)strtoul(argv[3], NULL, 0) : 0;
-        *payload_len = 1;
         return 0;
     }
 
@@ -177,6 +187,24 @@ static int build_command(int argc, char **argv, uint8_t *type, uint8_t *payload,
 
     if (strcmp(cmd, "imuread") == 0) {
         *type = CMD_IMU_READ;
+        *payload_len = 0;
+        return 0;
+    }
+
+    if (strcmp(cmd, "balance-enable") == 0) {
+        *type = CMD_BALANCE_ENABLE;
+        *payload_len = 0;
+        return 0;
+    }
+
+    if (strcmp(cmd, "balance-disable") == 0) {
+        *type = CMD_BALANCE_DISABLE;
+        *payload_len = 0;
+        return 0;
+    }
+
+    if (strcmp(cmd, "balance-status") == 0) {
+        *type = CMD_BALANCE_STATUS;
         *payload_len = 0;
         return 0;
     }
@@ -271,15 +299,9 @@ int main(int argc, char **argv)
     }
 
     printf("ack type=%u seq=%u payload_len=%u\n", ack.type, ack.seq, ack.length);
-    if (ack.length >= 3) {
-        printf("remote state: motor_left=%d motor_right=%d heartbeat_ok=%u",
-               (int8_t)ack.payload[0],
-               (int8_t)ack.payload[1],
-               ack.payload[2]);
-        if (ack.length >= 4) {
-            printf(" last_can_ret=%d", (int8_t)ack.payload[3]);
-        }
-        printf("\n");
+    if (ack.length >= 4) {
+        printf("remote state: heartbeat_ok=%u last_can_ret=%d\n",
+               ack.payload[2], (int8_t)ack.payload[3]);
     }
 
     if (ack.length >= 26) {
@@ -372,6 +394,34 @@ int main(int argc, char **argv)
                read_be_u32(&ack.payload[76]));
         printf("imu raw: acc=%d,%d,%d gyro=%d,%d,%d\n",
                acc[0], acc[1], acc[2], gyro[0], gyro[1], gyro[2]);
+    }
+
+    if (ack.length >= 120) {
+        static const char *const state_names[] = {
+            "disabled", "arming", "active", "fault"
+        };
+        uint8_t state = ack.payload[88];
+        uint8_t fault = ack.payload[89];
+        const char *state_name = state < 4U ? state_names[state] : "unknown";
+
+        printf("balance: state=%s(%u) fault=0x%02X control_hz=%u loop_count=%u\n",
+               state_name, state, fault, read_be_u16(&ack.payload[90]),
+               read_be_u32(&ack.payload[116]));
+        printf("balance state: pitch=%.6f rad pitch_rate=%.6f rad/s position=%.6f m velocity=%.6f m/s\n",
+               (double)read_be_i32(&ack.payload[92]) / 1000000.0,
+               (double)read_be_i32(&ack.payload[96]) / 1000000.0,
+               (double)read_be_i32(&ack.payload[100]) / 1000000.0,
+               (double)read_be_i32(&ack.payload[104]) / 1000000.0);
+        printf("balance output: left=%.6f Nm right=%.6f Nm\n",
+               (double)read_be_i32(&ack.payload[108]) / 1000000.0,
+               (double)read_be_i32(&ack.payload[112]) / 1000000.0);
+        if (fault != 0U) {
+            printf("balance fault bits: imu=%u left_motor=%u right_motor=%u can=%u fall=%u overrun=%u arm_timeout=%u config=%u\n",
+                   !!(fault & 0x01U), !!(fault & 0x02U),
+                   !!(fault & 0x04U), !!(fault & 0x08U),
+                   !!(fault & 0x10U), !!(fault & 0x20U),
+                   !!(fault & 0x40U), !!(fault & 0x80U));
+        }
     }
 
     close(fd);

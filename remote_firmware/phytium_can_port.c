@@ -8,6 +8,7 @@
 #include "fio_mux.h"
 #include "fcan_hw.h"
 #include "fparameters.h"
+#include "fgeneric_timer.h"
 #include "ftypes.h"
 #include <stdio.h>
 #include <string.h>
@@ -31,9 +32,11 @@
 
 static FCanCtrl g_can;
 static int g_can_ready = 0;
+static MotorFeedback g_motor_feedback[128];
 static PhytiumCanDebugState g_can_debug = {
     .init_ret = -99,
     .last_send_ret = -99,
+    .last_receive_ret = -99,
     .can_id = PHYTIUM_CAN_ID,
     .baudrate = PHYTIUM_CAN_BAUDRATE,
 };
@@ -135,7 +138,7 @@ int phytium_can_init(void)
     return 0;
 }
 
-int phytium_can_send(const Jc4010CanFrame *frame)
+int phytium_can_send(const MotorCanFrame *frame)
 {
     FError ret;
     FCanFrame send_frame;
@@ -167,12 +170,6 @@ int phytium_can_send(const Jc4010CanFrame *frame)
         g_can_debug.last_frame_data[i] = send_frame.data[i];
     }
 
-    printf("phytium_can_send: id=0x%03x dlc=%u data=%02x %02x %02x %02x %02x %02x %02x %02x\r\n",
-           (unsigned)send_frame.canid,
-           (unsigned)send_frame.candlc,
-           send_frame.data[0], send_frame.data[1], send_frame.data[2], send_frame.data[3],
-           send_frame.data[4], send_frame.data[5], send_frame.data[6], send_frame.data[7]);
-
     ret = FCanSend(&g_can, &send_frame);
     if (ret != FCAN_SUCCESS) {
         g_can_debug.last_send_ret = -3;
@@ -184,14 +181,55 @@ int phytium_can_send(const Jc4010CanFrame *frame)
     g_can_debug.last_send_ret = 0;
     g_can_debug.send_count++;
     phytium_can_update_regs();
-    printf("phytium_can_regs: ctrl=0x%08x intr=0x%08x xfer=0x%08x err=0x%08x fifo=0x%08x en=0x%08x\r\n",
-           (unsigned)g_can_debug.reg_ctrl,
-           (unsigned)g_can_debug.reg_intr,
-           (unsigned)g_can_debug.reg_xfer_sts,
-           (unsigned)g_can_debug.reg_err_cnt,
-           (unsigned)g_can_debug.reg_fifo_cnt,
-           (unsigned)g_can_debug.reg_xfer_en);
-    printf("phytium_can_send: FCanSend ok count=%u\r\n", (unsigned)g_can_debug.send_count);
+    return 0;
+}
+
+int phytium_can_poll(void)
+{
+    int received = 0;
+
+    if (!g_can_ready && phytium_can_init() != 0) {
+        g_can_debug.last_receive_ret = -2;
+        return -2;
+    }
+
+    while (received < 16 && !FCAN_RX_FIFO_EMPTY(g_can.config.base_address)) {
+        FCanFrame rx_frame;
+        MotorCanFrame frame;
+        MotorFeedback feedback;
+        FError ret = FCanRecv(&g_can, &rx_frame);
+
+        if (ret != FCAN_SUCCESS) {
+            g_can_debug.last_receive_ret = -3;
+            return received > 0 ? received : -3;
+        }
+
+        frame.id = rx_frame.canid & CAN_SFF_MASK;
+        frame.dlc = rx_frame.candlc > MOTOR_CAN_DLC ? MOTOR_CAN_DLC : rx_frame.candlc;
+        memset(frame.data, 0, sizeof(frame.data));
+        memcpy(frame.data, rx_frame.data, frame.dlc);
+        if (motor_parse_feedback(&frame, &feedback) == 0 &&
+            feedback.motor_id < (uint8_t)(sizeof(g_motor_feedback) / sizeof(g_motor_feedback[0]))) {
+            feedback.update_tick = GenericTimerRead(GENERIC_TIMER_ID0);
+            g_motor_feedback[feedback.motor_id] = feedback;
+        }
+        received++;
+        g_can_debug.receive_count++;
+    }
+
+    g_can_debug.last_receive_ret = 0;
+    return received;
+}
+
+int phytium_can_get_motor_feedback(uint8_t motor_id, MotorFeedback *feedback)
+{
+    if (feedback == NULL || motor_id >=
+        (uint8_t)(sizeof(g_motor_feedback) / sizeof(g_motor_feedback[0])) ||
+        !g_motor_feedback[motor_id].valid) {
+        return -1;
+    }
+
+    *feedback = g_motor_feedback[motor_id];
     return 0;
 }
 
@@ -216,6 +254,7 @@ int phytium_can_bus_ok(void)
 static PhytiumCanDebugState g_can_debug = {
     .init_ret = -98,
     .last_send_ret = -98,
+    .last_receive_ret = -98,
     .can_id = 1,
     .baudrate = 1000000U,
 };
@@ -226,7 +265,7 @@ int phytium_can_init(void)
     return -98;
 }
 
-int phytium_can_send(const Jc4010CanFrame *frame)
+int phytium_can_send(const MotorCanFrame *frame)
 {
     if (frame) {
         g_can_debug.last_frame_id = frame->id;
@@ -236,6 +275,19 @@ int phytium_can_send(const Jc4010CanFrame *frame)
         }
     }
     g_can_debug.last_send_ret = -98;
+    return -98;
+}
+
+int phytium_can_poll(void)
+{
+    g_can_debug.last_receive_ret = -98;
+    return -98;
+}
+
+int phytium_can_get_motor_feedback(uint8_t motor_id, MotorFeedback *feedback)
+{
+    (void)motor_id;
+    (void)feedback;
     return -98;
 }
 
