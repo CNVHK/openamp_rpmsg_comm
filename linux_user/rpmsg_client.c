@@ -417,7 +417,7 @@ int main(int argc, char **argv)
                (double)read_be_i32(&ack.payload[108]) / 1000000.0,
                (double)read_be_i32(&ack.payload[112]) / 1000000.0);
         if (fault != 0U) {
-            printf("balance fault bits: imu=%u left_motor=%u right_motor=%u can=%u fall=%u overrun=%u arm_timeout=%u config=%u\n",
+            printf("balance fault bits: imu=%u left_motor=%u right_motor=%u can=%u fall=%u overrun=%u arm_timeout=%u speed_or_config=%u\n",
                    !!(fault & 0x01U), !!(fault & 0x02U),
                    !!(fault & 0x04U), !!(fault & 0x08U),
                    !!(fault & 0x10U), !!(fault & 0x20U),

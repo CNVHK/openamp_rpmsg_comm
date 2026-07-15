@@ -17,6 +17,8 @@
 #define BALANCE_IMU_CALIBRATION_SAMPLES 100U
 #define BALANCE_FEEDBACK_TIMEOUT_MS 100U
 #define BALANCE_ARM_TIMEOUT_MS 2000U
+#define BALANCE_ARM_MAX_WHEEL_SPEED_M_S 0.10f
+#define BALANCE_MAX_WHEEL_SPEED_M_S 1.0f
 #define BALANCE_PI 3.14159265358979323846f
 
 static LqrController g_lqr;
@@ -130,7 +132,7 @@ int balance_control_init(void)
         .k_position = -1.414213562f,
         .k_velocity = -5.829463511f,
         .wheel_radius_m = 0.03225f,
-        .torque_limit_nm = 0.22f,
+        .torque_limit_nm = 0.05f,
         .fall_angle_rad = 15.0f * BALANCE_PI / 180.0f,
         .pitch_offset_rad = 0.0f,
         .left_motor_direction = 1.0f,
@@ -256,6 +258,13 @@ void balance_control_poll(void)
         (void)send_torque(BALANCE_LEFT_MOTOR_ID, 0.0f);
         (void)send_torque(BALANCE_RIGHT_MOTOR_ID, 0.0f);
         if (read_lqr_sensor(now, &sensor, &fault) == 0) {
+            if (fabsf(sensor.left_velocity_rad_s * g_lqr.config.wheel_radius_m) >
+                    BALANCE_ARM_MAX_WHEEL_SPEED_M_S ||
+                fabsf(sensor.right_velocity_rad_s * g_lqr.config.wheel_radius_m) >
+                    BALANCE_ARM_MAX_WHEEL_SPEED_M_S) {
+                enter_fault(BALANCE_FAULT_SPEED);
+                return;
+            }
             g_lqr.config.pitch_offset_rad = sensor.pitch_rad;
             if (lqr_enable(&g_lqr, &sensor) == 0) {
                 g_telemetry.state = BALANCE_STATE_ACTIVE;
@@ -275,6 +284,10 @@ void balance_control_poll(void)
     output = lqr_update(&g_lqr, &sensor);
     if (output.fault || !output.enabled) {
         enter_fault(BALANCE_FAULT_FALL);
+        return;
+    }
+    if (fabsf(output.wheel_velocity_m_s) > BALANCE_MAX_WHEEL_SPEED_M_S) {
+        enter_fault(BALANCE_FAULT_SPEED);
         return;
     }
     if (send_torque(BALANCE_LEFT_MOTOR_ID, output.left_torque_nm) != 0 ||
