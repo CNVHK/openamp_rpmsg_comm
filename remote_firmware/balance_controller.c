@@ -2,6 +2,7 @@
 
 #include "fgeneric_timer.h"
 #include "fparameters.h"
+#include "fsleep.h"
 #include "lqr_controller.h"
 #include "motor_can.h"
 #include "phytium_bmi088_port.h"
@@ -178,10 +179,12 @@ int balance_control_enable(void)
     ret |= send_frame(&frame);
     motor_build_set_mode(BALANCE_RIGHT_MOTOR_ID, 0U, &frame);
     ret |= send_frame(&frame);
+    fsleep_millisec(5U);
     motor_build_enable(BALANCE_LEFT_MOTOR_ID, &frame);
     ret |= send_frame(&frame);
     motor_build_enable(BALANCE_RIGHT_MOTOR_ID, &frame);
     ret |= send_frame(&frame);
+    fsleep_millisec(5U);
     ret |= send_torque(BALANCE_LEFT_MOTOR_ID, 0.0f);
     ret |= send_torque(BALANCE_RIGHT_MOTOR_ID, 0.0f);
     if (ret != 0) {

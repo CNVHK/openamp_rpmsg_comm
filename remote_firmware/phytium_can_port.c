@@ -236,17 +236,15 @@ int phytium_can_get_motor_feedback(uint8_t motor_id, MotorFeedback *feedback)
 int phytium_can_bus_ok(void)
 {
     uint32_t tx_err;
-    uint32_t tx_fifo;
 
     if (!g_can_ready) {
         return 0;
     }
 
     phytium_can_update_regs();
-    tx_err = (g_can_debug.reg_err_cnt >> 24) & 0xffU;
-    tx_fifo = (g_can_debug.reg_fifo_cnt >> 16) & 0xffU;
+    tx_err = FCAN_ERR_CNT_TFN_GET(g_can_debug.reg_err_cnt);
 
-    return tx_err < 128U && tx_fifo < 8U;
+    return tx_err < 128U && (g_can_debug.reg_ctrl & 0x1U) != 0U;
 }
 
 #else
