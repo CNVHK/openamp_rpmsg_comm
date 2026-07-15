@@ -124,12 +124,12 @@ static int read_lqr_sensor(uint64_t now, LqrSensorData *sensor,
 int balance_control_init(void)
 {
     const LqrConfig config = {
-        .k_theta = -119.5795f,
-        .k_theta_rate = -14.0267f,
-        .k_position = -1.4142f,
-        .k_velocity = -4.8475f,
-        .wheel_radius_m = 0.055f,
-        .torque_limit_nm = 0.10f,
+        .k_theta = -152.765302998f,
+        .k_theta_rate = -13.260563186f,
+        .k_position = -1.414213562f,
+        .k_velocity = -5.829463511f,
+        .wheel_radius_m = 0.03225f,
+        .torque_limit_nm = 0.22f,
         .fall_angle_rad = 15.0f * BALANCE_PI / 180.0f,
         .pitch_offset_rad = 0.0f,
         .left_motor_direction = 1.0f,
