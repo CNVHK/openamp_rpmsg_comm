@@ -38,7 +38,6 @@ typedef struct {
 } BalanceTelemetry;
 
 int balance_control_init(void);
-int balance_control_set_zero(void);
 int balance_control_enable(void);
 void balance_control_disable(void);
 void balance_control_poll(void);

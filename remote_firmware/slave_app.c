@@ -276,7 +276,7 @@ static size_t build_ack(uint8_t seq, uint8_t *out, size_t out_size)
         write_be_u16(&payload[52 + i * 2], servo_dbg->angle_deg[i]);
     }
     if (g_last_command_type >= CMD_BALANCE_ENABLE &&
-        g_last_command_type <= CMD_BALANCE_SET_ZERO) {
+        g_last_command_type <= CMD_BALANCE_STATUS) {
         if (phytium_can_get_motor_feedback(1U, &left_feedback) == 0) {
             write_be_u16(&payload[80], (uint16_t)left_feedback.current_x100_a);
             write_be_u16(&payload[84], (uint16_t)left_feedback.speed_rpm);
@@ -386,9 +386,6 @@ size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply,
         balance_control_disable();
         return build_ack(frame.seq, reply, reply_size);
     case CMD_BALANCE_STATUS:
-        return build_ack(frame.seq, reply, reply_size);
-    case CMD_BALANCE_SET_ZERO:
-        (void)balance_control_set_zero();
         return build_ack(frame.seq, reply, reply_size);
     case CMD_CAN_ZERO_POSITION:
         if (frame.length >= 1) {

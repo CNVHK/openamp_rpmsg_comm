@@ -39,7 +39,7 @@
 | 轮组转动惯量 | 0.00014900 kg·m² |
 | 控制频率 | 100 Hz |
 | 当前模型单轮力矩限制 | 0.22 N·m |
-| 启用时最大绝对俯仰角 | 5° |
+| 启用时相对固定直立目标的最大俯仰角 | 5° |
 | 启用时最大绝对俯仰角速度 | 0.15 rad/s |
 | 启用前单轮最大允许线速度 | 0.10 m/s |
 | 运行超速保护阈值 | 1.0 m/s |
@@ -50,11 +50,11 @@
 
 控制律输出 `u` 为两轮共同水平驱动力，单轮力矩换算为 `tau = u × 0.016125`。5° 初始倾角仿真的最大总水平力为 13.3313 N、最大单轮力矩为 0.2150 N·m，因此第三阶段限幅设为 0.22 N·m。
 
-`balance-zero` 将当时的重力俯仰角保存为 RAM 中的机械直立参考。控制器不会自动知道机械平衡点：操作者必须用绳子或保护架将机器人保持在认定的机械直立位置、完全静止后执行该命令。`balance-enable` 不再重新定义零点，只允许在已标定参考的 ±5° 内启动。当前 15° 倾倒保护也是相对该参考计算的。参考值未写入非易失存储，每次重启从核后需重新执行 `balance-zero`。
+标准平衡车的 `theta=0` 是固定车身坐标系的直立姿态，由加速度计的重力方向和固定的 IMU 安装偏角共同确定。当前 `BALANCE_IMU_MOUNT_PITCH_RAD=0` 假设 IMU 坐标轴与车身坐标轴对齐。`balance-enable` 只校准陀螺仪零偏并将当前轮位置设为 `p=0`，不再修改俯仰零点。绳子只作为松弛的防摔保护，不定义平衡角。
 
 对 `balance-enable` / `balance-disable` / `balance-status` 的 ACK，原 servo PWM 调试字段临时复用为左右电机反馈电流和原始 rpm，主核客户端输出 `motor feedback`。
 
-启用时要求俯仰角相对机械参考不超过 5°、俯仰角速度不超过 0.15 rad/s，且任一轮线速度绝对值不超过 0.10 m/s，否则拒绝进入 active。active 状态下平均轮速绝对值超过 1.0 m/s 时立即进入故障并下发零力矩和 idle。
+启用时要求车身俯仰角相对固定直立目标不超过 5°、俯仰角速度不超过 0.15 rad/s，且任一轮线速度绝对值不超过 0.10 m/s，否则拒绝进入 active。active 状态下平均轮速绝对值超过 1.0 m/s 时立即进入故障并下发零力矩和 idle。
 
 控制频率当前设为 100 Hz，因为 BMI088 现有加速度计和陀螺仪配置均为 100 Hz。提升到 500 Hz 前必须先同步修改 IMU ODR、滤波带宽和超时阈值。
 
@@ -102,7 +102,6 @@ make client
 
 ```bash
 sudo ./build/rpmsg_client /dev/rpmsg0 balance-status
-sudo ./build/rpmsg_client /dev/rpmsg0 balance-zero
 sudo ./build/rpmsg_client /dev/rpmsg0 balance-enable
 watch -n 0.1 'sudo ./build/rpmsg_client /dev/rpmsg0 balance-status'
 sudo ./build/rpmsg_client /dev/rpmsg0 balance-disable

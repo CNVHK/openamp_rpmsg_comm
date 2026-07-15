@@ -70,7 +70,6 @@ static void usage(const char *prog)
     printf("  %s <rpmsg_dev> imuinit\n", prog);
     printf("  %s <rpmsg_dev> imuread\n", prog);
     printf("  %s <rpmsg_dev> balance-enable\n", prog);
-    printf("  %s <rpmsg_dev> balance-zero\n", prog);
     printf("  %s <rpmsg_dev> balance-disable\n", prog);
     printf("  %s <rpmsg_dev> balance-status\n", prog);
     printf("  %s <rpmsg_dev> pvt <motor_id> <pos_x100_deg> <speed_rpm> <torque_percent>\n", prog);
@@ -194,12 +193,6 @@ static int build_command(int argc, char **argv, uint8_t *type, uint8_t *payload,
 
     if (strcmp(cmd, "balance-enable") == 0) {
         *type = CMD_BALANCE_ENABLE;
-        *payload_len = 0;
-        return 0;
-    }
-
-    if (strcmp(cmd, "balance-zero") == 0) {
-        *type = CMD_BALANCE_SET_ZERO;
         *payload_len = 0;
         return 0;
     }
@@ -372,7 +365,7 @@ int main(int argc, char **argv)
                servo_angle[2],
                servo_angle[3]);
         if (ack.length >= 88 && type >= CMD_BALANCE_ENABLE &&
-            type <= CMD_BALANCE_SET_ZERO) {
+            type <= CMD_BALANCE_STATUS) {
             int16_t left_current_x100 = (int16_t)read_be_u16(&ack.payload[80]);
             int16_t right_current_x100 = (int16_t)read_be_u16(&ack.payload[82]);
             int16_t left_speed_rpm = (int16_t)read_be_u16(&ack.payload[84]);
