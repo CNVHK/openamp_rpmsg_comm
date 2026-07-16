@@ -374,6 +374,42 @@ static size_t build_balance_config_ack(uint8_t type, uint8_t seq,
     return rpmsg_encode(type, seq, payload, sizeof(payload), out, out_size);
 }
 
+static size_t build_balance_telemetry_ack(uint8_t seq, uint8_t *out,
+                                          size_t out_size)
+{
+    const BalanceTelemetry *telemetry = balance_control_get_telemetry();
+    MotorFeedback left = {0};
+    MotorFeedback right = {0};
+    uint8_t payload[BALANCE_TELEMETRY_PAYLOAD_SIZE];
+
+    memset(payload, 0, sizeof(payload));
+    (void)phytium_can_get_motor_feedback(1U, &left);
+    (void)phytium_can_get_motor_feedback(2U, &right);
+    payload[0] = BALANCE_TELEMETRY_VERSION;
+    payload[1] = telemetry->state;
+    payload[2] = telemetry->fault;
+    write_be_u16(&payload[4], telemetry->control_hz);
+    write_be_u32(&payload[8], telemetry->loop_count);
+    write_be_i32(&payload[12],
+                 float_to_i32(telemetry->pitch_rad, 1000000.0f));
+    write_be_i32(&payload[16],
+                 float_to_i32(telemetry->pitch_rate_rad_s, 1000000.0f));
+    write_be_i32(&payload[20],
+                 float_to_i32(telemetry->wheel_position_m, 1000000.0f));
+    write_be_i32(&payload[24],
+                 float_to_i32(telemetry->wheel_velocity_m_s, 1000000.0f));
+    write_be_i32(&payload[28],
+                 float_to_i32(telemetry->left_torque_nm, 1000000.0f));
+    write_be_i32(&payload[32],
+                 float_to_i32(telemetry->right_torque_nm, 1000000.0f));
+    write_be_u16(&payload[36], (uint16_t)left.current_x100_a);
+    write_be_u16(&payload[38], (uint16_t)right.current_x100_a);
+    write_be_u16(&payload[40], (uint16_t)left.speed_rpm);
+    write_be_u16(&payload[42], (uint16_t)right.speed_rpm);
+    return rpmsg_encode(CMD_BALANCE_TELEMETRY, seq, payload,
+                        sizeof(payload), out, out_size);
+}
+
 static size_t build_speed_diag_ack(uint8_t seq, uint8_t *out,
                                    size_t out_size)
 {
@@ -729,6 +765,8 @@ size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply,
         return build_ack(frame.seq, reply, reply_size);
     case CMD_BALANCE_STATUS:
         return build_ack(frame.seq, reply, reply_size);
+    case CMD_BALANCE_TELEMETRY:
+        return build_balance_telemetry_ack(frame.seq, reply, reply_size);
     case CMD_BALANCE_SET_TRIM: {
         int status = BALANCE_CONFIG_INVALID;
         if (frame.length >= 4U) {

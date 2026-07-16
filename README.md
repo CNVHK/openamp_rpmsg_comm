@@ -123,7 +123,7 @@ rprun balance-config
 设置四个直接总力矩 LQR 增益：
 
 ```bash
-rprun balance-gains -3.759674 -0.486785 -0.062457 -0.247058
+rprun balance-gains -3.759674 -0.400000 -0.062457 -0.247058
 rprun balance-config
 ```
 
@@ -138,6 +138,39 @@ rprun balance-reset-config
 当俯仰角绝对值达到 `3` 度，并且位置/速度力矩与姿态恢复力矩方向相反时，
 控制器会临时屏蔽相反的行走力矩，优先使用电机力矩恢复姿态。回到阈值以内后
 自动恢复完整四状态 LQR。
+
+## 高频平衡日志
+
+`balance_logger` 使用一个常驻进程和轻量 RPMsg 遥测回复，不再为每个样本
+启动一次 `sudo rpmsg_client`。默认采样率为 20 Hz，最高允许 50 Hz。推荐由
+日志器负责启用平衡控制；按 `Ctrl+C`、收到 `SIGTERM` 或达到指定时长时，
+它会自动发送 `balance-disable`：
+
+```bash
+make logger
+sudo ./build/balance_logger --rate 20 --enable --stop-on-fault
+```
+
+短时间 50 Hz 测试并在 30 秒后自动停机：
+
+```bash
+sudo ./build/balance_logger --rate 50 --duration 30 --enable --stop-on-fault
+```
+
+只记录已经运行的控制器，不负责启停：
+
+```bash
+sudo ./build/balance_logger --rate 20
+```
+
+日志默认写入 `logs/balance/`，每小时创建新 CSV，并在切换后后台压缩上一小时
+文件。即使使用 `sudo`，程序也会在打开 RPMsg 设备后恢复为原用户身份，因此
+日志不会变成 root 所有。CSV 包含 `read_ok`、RPMsg `latency_us`、从核
+`loop_count`、真实 `state/fault`、LQR 状态、力矩、电流和原始轮速。
+
+同一个 `/dev/rpmsg0` 上的多个读取者可能竞争回复。日志器运行期间不要另开
+终端执行 `rprun`；它已经每秒显示一次状态、故障、俯仰角、速度、实际采样率
+和累计错误数。需要修改配置时，先按 `Ctrl+C` 停止日志器。
 
 `pvt 1 1000 100 20` 含义：
 

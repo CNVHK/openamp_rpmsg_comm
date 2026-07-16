@@ -70,6 +70,20 @@ static void test_motor_speed_diag_frame(void)
     assert(frame.length == sizeof(payload));
 }
 
+static void test_balance_telemetry_frame(void)
+{
+    uint8_t buffer[16];
+    RpmsgFrame frame;
+    size_t size = rpmsg_encode(CMD_BALANCE_TELEMETRY, 6, NULL, 0,
+                               buffer, sizeof(buffer));
+
+    assert(size == 5);
+    assert(rpmsg_decode(buffer, size, &frame));
+    assert(frame.type == CMD_BALANCE_TELEMETRY);
+    assert(frame.length == 0U);
+    assert(BALANCE_TELEMETRY_PAYLOAD_SIZE == 44U);
+}
+
 int main(void)
 {
     test_encode_decode();
@@ -77,6 +91,7 @@ int main(void)
     test_balance_gain_frame();
     test_balance_speed_limit_frame();
     test_motor_speed_diag_frame();
+    test_balance_telemetry_frame();
     printf("rpmsg protocol tests passed\n");
     return 0;
 }

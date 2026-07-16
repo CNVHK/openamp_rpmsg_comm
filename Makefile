@@ -3,9 +3,9 @@ CFLAGS ?= -std=c99 -Wall -Wextra -I./src
 PYTHON ?= python3
 BUILD_DIR := build
 
-.PHONY: all test client gimbal clean
+.PHONY: all test client logger gimbal clean
 
-all: test client gimbal
+all: test client logger gimbal
 
 $(BUILD_DIR):
 	$(PYTHON) -c "import os; os.makedirs('$(BUILD_DIR)', exist_ok=True)"
@@ -14,6 +14,8 @@ test: $(BUILD_DIR) $(BUILD_DIR)/test_protocol $(BUILD_DIR)/test_motor_can \
 	$(BUILD_DIR)/test_motor_balance_protocol $(BUILD_DIR)/test_lqr_controller
 
 client: $(BUILD_DIR) $(BUILD_DIR)/rpmsg_client
+
+logger: $(BUILD_DIR) $(BUILD_DIR)/balance_logger
 
 gimbal: $(BUILD_DIR) $(BUILD_DIR)/gimbal_test
 
@@ -33,6 +35,9 @@ $(BUILD_DIR)/gimbal_test: src/rpmsg_protocol.c src/rpmsg_protocol.h linux_user/g
 	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@
 
 $(BUILD_DIR)/rpmsg_client: src/rpmsg_protocol.c src/rpmsg_protocol.h linux_user/rpmsg_client.c
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@
+
+$(BUILD_DIR)/balance_logger: src/rpmsg_protocol.c src/rpmsg_protocol.h linux_user/balance_logger.c
 	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@
 
 clean:
