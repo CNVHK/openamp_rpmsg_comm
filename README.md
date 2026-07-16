@@ -111,7 +111,14 @@ sudo ./rpmsg_client /dev/rpmsg0 stop 1
 make gimbal
 ```
 
-`torque-test` 仅用于排查 ID 1/2 轮电机的力矩模式。力矩范围为 -0.22–0.22 N·m，脉冲时间为 20–500 ms；命令结束后会自动发送零力矩并进入 idle。
+`torque-test` 仅用于排查 ID 1/2 轮电机的力矩模式。力矩范围为 -0.22–0.22 N·m，脉冲时间为 20–2000 ms；命令结束后会自动发送零力矩并进入 idle。长时间测试前必须先用机械方式约束车轮，不能用手接触旋转中的车轮。
+
+读取电机驱动器错误寄存器 `0x000C`：
+
+```bash
+sudo ./build/rpmsg_client /dev/rpmsg0 motor-fault 1
+sudo ./build/rpmsg_client /dev/rpmsg0 motor-fault 2
+```
 
 首次安装时，先卸载负载或架空云台，并手动把 yaw、pitch 放到机械中位。确认位置无误后执行永久标零：
 

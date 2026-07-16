@@ -7,6 +7,7 @@ int main(void)
 {
     MotorCanFrame frame;
     MotorFeedback feedback = {0};
+    MotorRegisterValue register_value = {0};
 
     motor_build_torque(2U, -25, &frame);
     assert(frame.id == 0x602U);
@@ -30,6 +31,25 @@ int main(void)
     assert(feedback.speed_rpm == -100);
     assert(feedback.current_x100_a == 123);
     assert(feedback.valid == 1U);
+
+    motor_build_read_u32(2U, 0x000cU, &frame);
+    assert(frame.id == 0x602U);
+    assert(frame.data[0] == 0x43U);
+    assert(frame.data[1] == 0x00U && frame.data[2] == 0x0cU);
+
+    frame.id = 0x582U;
+    frame.data[0] = 0x43U;
+    frame.data[1] = 0x00U;
+    frame.data[2] = 0x0cU;
+    frame.data[4] = 0x01U;
+    frame.data[5] = 0x00U;
+    frame.data[6] = 0x08U;
+    frame.data[7] = 0x00U;
+    assert(motor_parse_register_u32(&frame, &register_value) == 0);
+    assert(register_value.motor_id == 2U);
+    assert(register_value.address == 0x000cU);
+    assert(register_value.value == 0x01000800U);
+    assert(register_value.valid == 1U);
 
     puts("motor_balance_protocol_test: PASS");
     return 0;

@@ -9,7 +9,7 @@
 #include <sys/select.h>
 #include <unistd.h>
 
-#define RPMSG_CLIENT_VERSION "0.13.0-lqr"
+#define RPMSG_CLIENT_VERSION "0.14.0-lqr-diagnostics"
 
 static int wait_readable(int fd, int timeout_ms)
 {
@@ -55,6 +55,51 @@ static uint16_t read_be_u16(const uint8_t *p)
     return (uint16_t)(((uint16_t)p[0] << 8) | p[1]);
 }
 
+static void print_motor_fault_bits(uint32_t code)
+{
+    static const struct {
+        uint32_t bit;
+        const char *name;
+    } faults[] = {
+        {0x00000001U, "power/calibration-current"},
+        {0x00000002U, "phase-resistance"},
+        {0x00000008U, "calibration-current-ripple"},
+        {0x00000010U, "phase-inductance"},
+        {0x00000020U, "encoder-bandwidth"},
+        {0x00000040U, "encoder-spi"},
+        {0x00000080U, "encoder-type"},
+        {0x00000100U, "hall-not-calibrated"},
+        {0x00000200U, "encoder-no-data"},
+        {0x00000400U, "encoder-cpr"},
+        {0x00000800U, "run-state"},
+        {0x00008000U, "hall-signal"},
+        {0x00020000U, "secondary-encoder"},
+        {0x00080000U, "gate-driver"},
+        {0x00100000U, "mos-overtemperature"},
+        {0x00200000U, "motor-overtemperature"},
+        {0x00400000U, "undervoltage"},
+        {0x00800000U, "overvoltage"},
+        {0x01000000U, "overcurrent"},
+    };
+    int found = 0;
+
+    if (code == 0U) {
+        printf("motor fault decoded: none\n");
+        return;
+    }
+    printf("motor fault decoded:");
+    for (size_t i = 0; i < sizeof(faults) / sizeof(faults[0]); ++i) {
+        if ((code & faults[i].bit) != 0U) {
+            printf(" %s", faults[i].name);
+            found = 1;
+        }
+    }
+    if (!found) {
+        printf(" unknown-bits");
+    }
+    printf("\n");
+}
+
 static void usage(const char *prog)
 {
     printf("Usage:\n");
@@ -66,6 +111,7 @@ static void usage(const char *prog)
     printf("  %s <rpmsg_dev> init <motor_id>\n", prog);
     printf("  %s <rpmsg_dev> test\n", prog);
     printf("  %s <rpmsg_dev> torque-test <motor_id> <torque_nm> [duration_ms]\n", prog);
+    printf("  %s <rpmsg_dev> motor-fault <motor_id>\n", prog);
     printf("  %s <rpmsg_dev> servo <s0_deg> <s1_deg> <s2_deg> <s3_deg>\n", prog);
     printf("  %s <rpmsg_dev> servopol <0..7>\n", prog);
     printf("  %s <rpmsg_dev> servocenter\n", prog);
@@ -175,7 +221,7 @@ static int build_command(int argc, char **argv, uint8_t *type, uint8_t *payload,
             end = NULL;
             duration_ms = strtoul(argv[5], &end, 0);
             if (end == argv[5] || *end != '\0' ||
-                duration_ms < 20U || duration_ms > 500U) {
+                duration_ms < 20U || duration_ms > 2000U) {
                 return -1;
             }
         }
@@ -186,6 +232,21 @@ static int build_command(int argc, char **argv, uint8_t *type, uint8_t *payload,
         put_be_u16(&payload[1], (uint16_t)torque_x100);
         put_be_u16(&payload[3], (uint16_t)duration_ms);
         *payload_len = 5U;
+        return 0;
+    }
+
+    if (strcmp(cmd, "motor-fault") == 0) {
+        char *end = NULL;
+        unsigned long motor_id;
+
+        if (argc < 4) return -1;
+        motor_id = strtoul(argv[3], &end, 0);
+        if (end == argv[3] || *end != '\0' || motor_id < 1U || motor_id > 2U) {
+            return -1;
+        }
+        *type = CMD_CAN_MOTOR_FAULT;
+        payload[0] = (uint8_t)motor_id;
+        *payload_len = 1U;
         return 0;
     }
 
@@ -402,7 +463,17 @@ int main(int argc, char **argv)
                servo_angle[1],
                servo_angle[2],
                servo_angle[3]);
-        if (ack.length >= 88 &&
+        if (ack.length >= 86 && type == CMD_CAN_MOTOR_FAULT) {
+            uint32_t fault_code = read_be_u32(&ack.payload[80]);
+            uint8_t motor_id = ack.payload[84];
+            int8_t read_ret = (int8_t)ack.payload[85];
+
+            printf("motor fault: id=%u read_ret=%d code=0x%08X\n",
+                   motor_id, read_ret, fault_code);
+            if (read_ret == 0) {
+                print_motor_fault_bits(fault_code);
+            }
+        } else if (ack.length >= 88 &&
             (type == CMD_CAN_TORQUE_TEST ||
              (type >= CMD_BALANCE_ENABLE && type <= CMD_BALANCE_STATUS))) {
             int16_t left_current_x100 = (int16_t)read_be_u16(&ack.payload[80]);

@@ -33,6 +33,7 @@
 static FCanCtrl g_can;
 static int g_can_ready = 0;
 static MotorFeedback g_motor_feedback[128];
+static MotorRegisterValue g_register_value[128];
 static PhytiumCanDebugState g_can_debug = {
     .init_ret = -99,
     .last_send_ret = -99,
@@ -213,6 +214,7 @@ int phytium_can_poll(void)
         FCanFrame rx_frame;
         MotorCanFrame frame;
         MotorFeedback feedback;
+        MotorRegisterValue register_value;
         FError ret = FCanRecv(&g_can, &rx_frame);
 
         if (ret != FCAN_SUCCESS) {
@@ -229,6 +231,13 @@ int phytium_can_poll(void)
             feedback.update_tick = GenericTimerRead(GENERIC_TIMER_ID0);
             g_motor_feedback[feedback.motor_id] = feedback;
             g_can_debug.feedback_count++;
+        }
+        if (motor_parse_register_u32(&frame, &register_value) == 0 &&
+            register_value.motor_id <
+                (uint8_t)(sizeof(g_register_value) /
+                          sizeof(g_register_value[0]))) {
+            register_value.update_tick = GenericTimerRead(GENERIC_TIMER_ID0);
+            g_register_value[register_value.motor_id] = register_value;
         }
         received++;
         g_can_debug.receive_count++;
@@ -247,6 +256,28 @@ int phytium_can_get_motor_feedback(uint8_t motor_id, MotorFeedback *feedback)
     }
 
     *feedback = g_motor_feedback[motor_id];
+    return 0;
+}
+
+void phytium_can_clear_register_value(uint8_t motor_id)
+{
+    if (motor_id < (uint8_t)(sizeof(g_register_value) /
+                             sizeof(g_register_value[0]))) {
+        memset(&g_register_value[motor_id], 0,
+               sizeof(g_register_value[motor_id]));
+    }
+}
+
+int phytium_can_get_register_value(uint8_t motor_id,
+                                   MotorRegisterValue *value)
+{
+    if (value == NULL || motor_id >=
+        (uint8_t)(sizeof(g_register_value) / sizeof(g_register_value[0])) ||
+        !g_register_value[motor_id].valid) {
+        return -1;
+    }
+
+    *value = g_register_value[motor_id];
     return 0;
 }
 
@@ -303,6 +334,19 @@ int phytium_can_get_motor_feedback(uint8_t motor_id, MotorFeedback *feedback)
 {
     (void)motor_id;
     (void)feedback;
+    return -98;
+}
+
+void phytium_can_clear_register_value(uint8_t motor_id)
+{
+    (void)motor_id;
+}
+
+int phytium_can_get_register_value(uint8_t motor_id,
+                                   MotorRegisterValue *value)
+{
+    (void)motor_id;
+    (void)value;
     return -98;
 }
 
