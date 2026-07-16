@@ -34,6 +34,7 @@ int phytium_can_init(void);
 int phytium_can_send(const MotorCanFrame *frame);
 int phytium_can_poll(void);
 int phytium_can_get_motor_feedback(uint8_t motor_id, MotorFeedback *feedback);
+void phytium_can_clear_motor_feedback(uint8_t motor_id);
 void phytium_can_clear_register_value(uint8_t motor_id);
 int phytium_can_get_register_value(uint8_t motor_id,
                                    MotorRegisterValue *value);

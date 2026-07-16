@@ -259,6 +259,15 @@ int phytium_can_get_motor_feedback(uint8_t motor_id, MotorFeedback *feedback)
     return 0;
 }
 
+void phytium_can_clear_motor_feedback(uint8_t motor_id)
+{
+    if (motor_id < (uint8_t)(sizeof(g_motor_feedback) /
+                             sizeof(g_motor_feedback[0]))) {
+        memset(&g_motor_feedback[motor_id], 0,
+               sizeof(g_motor_feedback[motor_id]));
+    }
+}
+
 void phytium_can_clear_register_value(uint8_t motor_id)
 {
     if (motor_id < (uint8_t)(sizeof(g_register_value) /
@@ -335,6 +344,11 @@ int phytium_can_get_motor_feedback(uint8_t motor_id, MotorFeedback *feedback)
     (void)motor_id;
     (void)feedback;
     return -98;
+}
+
+void phytium_can_clear_motor_feedback(uint8_t motor_id)
+{
+    (void)motor_id;
 }
 
 void phytium_can_clear_register_value(uint8_t motor_id)
