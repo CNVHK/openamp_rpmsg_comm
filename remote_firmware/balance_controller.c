@@ -24,7 +24,7 @@
 #define BALANCE_MIN_CONFIG_WHEEL_SPEED_M_S 0.5f
 #define BALANCE_MAX_CONFIG_WHEEL_SPEED_M_S 1.5f
 #define BALANCE_PI 3.14159265358979323846f
-#define BALANCE_MOTOR_FEEDBACK_SPEED_SCALE 0.5f
+#define BALANCE_MOTOR_FEEDBACK_SPEED_SCALE 1.0f
 #define BALANCE_PITCH_RATE_FILTER_HZ 10.0f
 #define BALANCE_IMU_MOUNT_PITCH_RAD 0.0f
 #define BALANCE_POSTURE_PRIORITY_ANGLE_RAD (3.0f * BALANCE_PI / 180.0f)
@@ -149,11 +149,7 @@ static int read_lqr_sensor(uint64_t now, LqrSensorData *sensor,
                                 BALANCE_PI / 18000.0f;
     sensor->right_position_rad = (float)right.position_x100_deg *
                                  BALANCE_PI / 18000.0f;
-    /*
-     * Position traces show that the 0x2A speed field is exactly 2x the
-     * position-derived shaft speed on this JC4805 setup. Keep the raw value
-     * in CAN diagnostics, but calibrate the physical speed used by LQR.
-     */
+    /* The 0x2A field matches register 0x0006 and position-derived speed. */
     sensor->left_velocity_rad_s = (float)left.speed_rpm *
                                   BALANCE_MOTOR_FEEDBACK_SPEED_SCALE *
                                   2.0f * BALANCE_PI / 60.0f;

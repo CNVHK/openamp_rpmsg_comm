@@ -182,9 +182,9 @@ sudo ./build/rpmsg_client /dev/rpmsg0 motor-speed-diag 1 0.05 1000
 sudo ./build/rpmsg_client /dev/rpmsg0 motor-speed-diag 2 -0.05 1000
 ```
 
-当前平衡控制根据实机日志对周期反馈速度应用 `0.5` 标定系数；原始 rpm
-仍由 `balance-status` 输出。俯仰角速度在进入 LQR 前经过 10 Hz 一阶低通，
-默认 `K2=-0.4`。`balance-config` 会显示这两个固定参数。
+实机三方对照确认周期反馈速度、`0x0006` 寄存器速度和位置差分速度误差
+小于约 1.2%，因此平衡控制使用 `1.0` 速度系数。俯仰角速度在进入 LQR
+前经过 10 Hz 一阶低通，默认 `K2=-0.4`。`balance-config` 会显示这两个固定参数。
 
 首次安装时，先卸载负载或架空云台，并手动把 yaw、pitch 放到机械中位。确认位置无误后执行永久标零：
 

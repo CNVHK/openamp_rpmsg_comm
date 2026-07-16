@@ -9,7 +9,7 @@
 #include <sys/select.h>
 #include <unistd.h>
 
-#define RPMSG_CLIENT_VERSION "0.17.0-lqr-speed-diagnostics"
+#define RPMSG_CLIENT_VERSION "0.17.1-lqr-speed-verified"
 #define RAD_PER_DEG 0.017453292519943295f
 
 static int wait_readable(int fd, int timeout_ms)
