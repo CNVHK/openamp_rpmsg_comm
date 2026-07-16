@@ -172,6 +172,20 @@ sudo ./build/rpmsg_client /dev/rpmsg0 motor-fault 1
 sudo ./build/rpmsg_client /dev/rpmsg0 motor-fault 2
 ```
 
+轮速三方对照诊断只能在平衡控制停用且车轮架空或机械约束时运行。它会短时施加不超过
+`0.10 N*m` 的力矩，同时比较周期反馈 `0x2A`、实时速度寄存器 `0x0006`
+和编码器位置差分得到的速度，结束后自动清零力矩并进入 idle：
+
+```bash
+rprun balance-disable
+sudo ./build/rpmsg_client /dev/rpmsg0 motor-speed-diag 1 0.05 1000
+sudo ./build/rpmsg_client /dev/rpmsg0 motor-speed-diag 2 -0.05 1000
+```
+
+当前平衡控制根据实机日志对周期反馈速度应用 `0.5` 标定系数；原始 rpm
+仍由 `balance-status` 输出。俯仰角速度在进入 LQR 前经过 10 Hz 一阶低通，
+默认 `K2=-0.4`。`balance-config` 会显示这两个固定参数。
+
 首次安装时，先卸载负载或架空云台，并手动把 yaw、pitch 放到机械中位。确认位置无误后执行永久标零：
 
 ```bash

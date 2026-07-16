@@ -9,7 +9,7 @@
 #include <sys/select.h>
 #include <unistd.h>
 
-#define RPMSG_CLIENT_VERSION "0.16.0-lqr-speed-limit"
+#define RPMSG_CLIENT_VERSION "0.17.0-lqr-speed-diagnostics"
 #define RAD_PER_DEG 0.017453292519943295f
 
 static int wait_readable(int fd, int timeout_ms)
@@ -119,6 +119,7 @@ static void usage(const char *prog)
     printf("  %s <rpmsg_dev> test\n", prog);
     printf("  %s <rpmsg_dev> torque-test <motor_id> <torque_nm> [duration_ms]\n", prog);
     printf("  %s <rpmsg_dev> motor-fault <motor_id>\n", prog);
+    printf("  %s <rpmsg_dev> motor-speed-diag <motor_id> <torque_nm> [duration_ms]\n", prog);
     printf("  %s <rpmsg_dev> servo <s0_deg> <s1_deg> <s2_deg> <s3_deg>\n", prog);
     printf("  %s <rpmsg_dev> servopol <0..7>\n", prog);
     printf("  %s <rpmsg_dev> servocenter\n", prog);
@@ -262,6 +263,42 @@ static int build_command(int argc, char **argv, uint8_t *type, uint8_t *payload,
         *type = CMD_CAN_MOTOR_FAULT;
         payload[0] = (uint8_t)motor_id;
         *payload_len = 1U;
+        return 0;
+    }
+
+    if (strcmp(cmd, "motor-speed-diag") == 0) {
+        char *end = NULL;
+        unsigned long motor_id;
+        unsigned long duration_ms = 1000U;
+        float torque_nm;
+        int16_t torque_x100;
+
+        if (argc < 5) return -1;
+        motor_id = strtoul(argv[3], &end, 0);
+        if (end == argv[3] || *end != '\0' || motor_id < 1U || motor_id > 2U) {
+            return -1;
+        }
+        end = NULL;
+        torque_nm = strtof(argv[4], &end);
+        if (end == argv[4] || *end != '\0' || !isfinite(torque_nm) ||
+            torque_nm < -0.10f || torque_nm > 0.10f) {
+            return -1;
+        }
+        if (argc >= 6) {
+            end = NULL;
+            duration_ms = strtoul(argv[5], &end, 0);
+            if (end == argv[5] || *end != '\0' ||
+                duration_ms < 200U || duration_ms > 2000U) {
+                return -1;
+            }
+        }
+        torque_x100 = (int16_t)(torque_nm >= 0.0f ?
+            torque_nm * 100.0f + 0.5f : torque_nm * 100.0f - 0.5f);
+        *type = CMD_CAN_SPEED_DIAG;
+        payload[0] = (uint8_t)motor_id;
+        put_be_u16(&payload[1], (uint16_t)torque_x100);
+        put_be_u16(&payload[3], (uint16_t)duration_ms);
+        *payload_len = 5U;
         return 0;
     }
 
@@ -477,6 +514,41 @@ int main(int argc, char **argv)
     }
 
     printf("ack type=%u seq=%u payload_len=%u\n", ack.type, ack.seq, ack.length);
+    if (type == CMD_CAN_SPEED_DIAG) {
+        static const char *const status_names[] = {
+            "ok", "invalid-or-busy", "can-error", "incomplete"
+        };
+        int32_t periodic;
+        int32_t register_speed;
+        int32_t position_speed;
+        uint8_t status;
+
+        if (ack.type != CMD_CAN_SPEED_DIAG || ack.length < 20U ||
+            ack.payload[0] != 1U) {
+            printf("invalid motor speed diagnostic reply\n");
+            close(fd);
+            return 3;
+        }
+        periodic = read_be_i32(&ack.payload[4]);
+        register_speed = read_be_i32(&ack.payload[8]);
+        position_speed = read_be_i32(&ack.payload[12]);
+        status = ack.payload[1];
+        printf("motor speed diagnostic: status=%s(%u) motor_id=%u valid=0x%02X samples=%u\n",
+               status < 4U ? status_names[status] : "unknown", status,
+               ack.payload[2], ack.payload[3],
+               read_be_u32(&ack.payload[16]));
+        printf("speed comparison: periodic_0x2A=%.2f rpm register_0x0006=%.2f rpm position_delta=%.2f rpm\n",
+               (double)periodic / 100.0,
+               (double)register_speed / 100.0,
+               (double)position_speed / 100.0);
+        if (periodic != 0) {
+            printf("speed ratios: register/periodic=%.4f position/periodic=%.4f\n",
+                   (double)register_speed / (double)periodic,
+                   (double)position_speed / (double)periodic);
+        }
+        close(fd);
+        return status == 0U ? 0 : 4;
+    }
     if (type >= CMD_BALANCE_SET_TRIM &&
         type <= CMD_BALANCE_SET_SPEED_LIMIT) {
         static const char *const status_names[] = {
@@ -485,7 +557,7 @@ int main(int argc, char **argv)
         uint8_t status;
         const char *status_name;
 
-        if (ack.length < 32U || ack.payload[0] != 2U) {
+        if (ack.length < 32U || ack.payload[0] < 2U) {
             printf("invalid balance config reply\n");
             close(fd);
             return 3;
@@ -510,6 +582,12 @@ int main(int argc, char **argv)
                (double)read_be_i32(&ack.payload[28]) / 1000000.0,
                (double)read_be_i32(&ack.payload[28]) / 1000000.0 /
                    0.03225 * 60.0 / (2.0 * 3.14159265358979323846));
+        if (ack.length >= 40U && ack.payload[0] >= 3U) {
+            printf("motor feedback speed scale: %.6f\n",
+                   (double)read_be_i32(&ack.payload[32]) / 1000000.0);
+            printf("pitch-rate low-pass cutoff: %.3f Hz\n",
+                   (double)read_be_i32(&ack.payload[36]) / 1000000.0);
+        }
         close(fd);
         return status == 0U ? 0 : 4;
     }

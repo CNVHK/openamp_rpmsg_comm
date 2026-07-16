@@ -51,6 +51,16 @@ int main(void)
     assert(register_value.value == 0x01000800U);
     assert(register_value.valid == 1U);
 
+    frame.data[1] = 0x00U;
+    frame.data[2] = 0x06U;
+    frame.data[4] = 0xffU;
+    frame.data[5] = 0xffU;
+    frame.data[6] = 0xd8U;
+    frame.data[7] = 0xf0U;
+    assert(motor_parse_register_u32(&frame, &register_value) == 0);
+    assert(register_value.address == 0x0006U);
+    assert((int32_t)register_value.value == -10000);
+
     puts("motor_balance_protocol_test: PASS");
     return 0;
 }

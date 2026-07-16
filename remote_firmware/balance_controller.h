@@ -45,6 +45,8 @@ typedef struct {
     float k_velocity;
     float posture_priority_angle_rad;
     float max_wheel_speed_m_s;
+    float motor_feedback_speed_scale;
+    float pitch_rate_filter_hz;
 } BalanceRuntimeConfig;
 
 enum {

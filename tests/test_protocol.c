@@ -56,12 +56,27 @@ static void test_balance_speed_limit_frame(void)
     assert(frame.length == sizeof(payload));
 }
 
+static void test_motor_speed_diag_frame(void)
+{
+    uint8_t payload[5] = {1, 0, 5, 3, 232};
+    uint8_t buffer[16];
+    RpmsgFrame frame;
+    size_t size = rpmsg_encode(CMD_CAN_SPEED_DIAG, 5, payload,
+                               sizeof(payload), buffer, sizeof(buffer));
+
+    assert(size == 10);
+    assert(rpmsg_decode(buffer, size, &frame));
+    assert(frame.type == CMD_CAN_SPEED_DIAG);
+    assert(frame.length == sizeof(payload));
+}
+
 int main(void)
 {
     test_encode_decode();
     test_bad_checksum();
     test_balance_gain_frame();
     test_balance_speed_limit_frame();
+    test_motor_speed_diag_frame();
     printf("rpmsg protocol tests passed\n");
     return 0;
 }

@@ -24,6 +24,8 @@
 #define BALANCE_MIN_CONFIG_WHEEL_SPEED_M_S 0.5f
 #define BALANCE_MAX_CONFIG_WHEEL_SPEED_M_S 1.5f
 #define BALANCE_PI 3.14159265358979323846f
+#define BALANCE_MOTOR_FEEDBACK_SPEED_SCALE 0.5f
+#define BALANCE_PITCH_RATE_FILTER_HZ 10.0f
 #define BALANCE_IMU_MOUNT_PITCH_RAD 0.0f
 #define BALANCE_POSTURE_PRIORITY_ANGLE_RAD (3.0f * BALANCE_PI / 180.0f)
 #define BALANCE_MAX_PITCH_TRIM_RAD (5.0f * BALANCE_PI / 180.0f)
@@ -35,11 +37,13 @@ static uint64_t g_period_ticks;
 static uint64_t g_next_tick;
 static uint64_t g_arm_tick;
 static float g_max_wheel_speed_m_s = BALANCE_DEFAULT_MAX_WHEEL_SPEED_M_S;
+static float g_filtered_pitch_rate_rad_s;
+static uint8_t g_pitch_rate_filter_valid;
 
 static const LqrConfig g_default_lqr_config = {
     /* 100 Hz discrete LQR; input is tau_left + tau_right in N*m. */
     .k_theta = -3.759673794f,
-    .k_theta_rate = -0.486784559f,
+    .k_theta_rate = -0.400000000f,
     .k_position = -0.062456846f,
     .k_velocity = -0.247058408f,
     .wheel_radius_m = 0.03225f,
@@ -145,12 +149,35 @@ static int read_lqr_sensor(uint64_t now, LqrSensorData *sensor,
                                 BALANCE_PI / 18000.0f;
     sensor->right_position_rad = (float)right.position_x100_deg *
                                  BALANCE_PI / 18000.0f;
+    /*
+     * Position traces show that the 0x2A speed field is exactly 2x the
+     * position-derived shaft speed on this JC4805 setup. Keep the raw value
+     * in CAN diagnostics, but calibrate the physical speed used by LQR.
+     */
     sensor->left_velocity_rad_s = (float)left.speed_rpm *
+                                  BALANCE_MOTOR_FEEDBACK_SPEED_SCALE *
                                   2.0f * BALANCE_PI / 60.0f;
     sensor->right_velocity_rad_s = (float)right.speed_rpm *
+                                   BALANCE_MOTOR_FEEDBACK_SPEED_SCALE *
                                    2.0f * BALANCE_PI / 60.0f;
     sensor->valid = 1U;
     return 0;
+}
+
+static float filter_pitch_rate(float pitch_rate_rad_s)
+{
+    const float dt = 1.0f / (float)BALANCE_CONTROL_HZ;
+    const float rc = 1.0f / (2.0f * BALANCE_PI * BALANCE_PITCH_RATE_FILTER_HZ);
+    const float alpha = dt / (rc + dt);
+
+    if (!g_pitch_rate_filter_valid) {
+        g_filtered_pitch_rate_rad_s = pitch_rate_rad_s;
+        g_pitch_rate_filter_valid = 1U;
+    } else {
+        g_filtered_pitch_rate_rad_s +=
+            alpha * (pitch_rate_rad_s - g_filtered_pitch_rate_rad_s);
+    }
+    return g_filtered_pitch_rate_rad_s;
 }
 
 int balance_control_init(void)
@@ -202,6 +229,7 @@ int balance_control_enable(void)
     g_telemetry.wheel_velocity_m_s = 0.0f;
     g_telemetry.left_torque_nm = 0.0f;
     g_telemetry.right_torque_nm = 0.0f;
+    g_pitch_rate_filter_valid = 0U;
     motor_build_set_mode(BALANCE_LEFT_MOTOR_ID, 0U, &frame);
     ret |= send_frame(&frame);
     motor_build_set_mode(BALANCE_RIGHT_MOTOR_ID, 0U, &frame);
@@ -303,6 +331,8 @@ void balance_control_poll(void)
                 return;
             }
             if (lqr_enable(&g_lqr, &sensor) == 0) {
+                g_filtered_pitch_rate_rad_s = sensor.pitch_rate_rad_s;
+                g_pitch_rate_filter_valid = 1U;
                 g_telemetry.state = BALANCE_STATE_ACTIVE;
                 return;
             }
@@ -317,6 +347,7 @@ void balance_control_poll(void)
         enter_fault(fault);
         return;
     }
+    sensor.pitch_rate_rad_s = filter_pitch_rate(sensor.pitch_rate_rad_s);
     output = lqr_update(&g_lqr, &sensor);
     if (output.fault || !output.enabled) {
         enter_fault(BALANCE_FAULT_FALL);
@@ -362,6 +393,8 @@ void balance_control_get_runtime_config(BalanceRuntimeConfig *config)
     config->posture_priority_angle_rad =
         g_lqr.config.posture_priority_angle_rad;
     config->max_wheel_speed_m_s = g_max_wheel_speed_m_s;
+    config->motor_feedback_speed_scale = BALANCE_MOTOR_FEEDBACK_SPEED_SCALE;
+    config->pitch_rate_filter_hz = BALANCE_PITCH_RATE_FILTER_HZ;
 }
 
 int balance_control_set_pitch_trim(float pitch_trim_rad)

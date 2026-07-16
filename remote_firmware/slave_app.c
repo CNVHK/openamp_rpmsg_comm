@@ -16,6 +16,7 @@
 #include "phytium_bmi088_port.h"
 #include "phytium_can_port.h"
 #include "phytium_servo_port.h"
+#include "fgeneric_timer.h"
 #include "fsleep.h"
 #include <math.h>
 #include <stdint.h>
@@ -33,6 +34,18 @@ static int16_t g_torque_test_peak_speed_rpm[2];
 static uint32_t g_motor_fault_code;
 static uint8_t g_motor_fault_id;
 static int8_t g_motor_fault_read_ret;
+
+typedef struct {
+    uint8_t status;
+    uint8_t motor_id;
+    uint8_t valid_flags;
+    int32_t periodic_speed_x100_rpm;
+    int32_t register_speed_x100_rpm;
+    int32_t position_speed_x100_rpm;
+    uint32_t sample_count;
+} MotorSpeedDiagResult;
+
+static MotorSpeedDiagResult g_speed_diag;
 
 static int send_motor_frame(const MotorCanFrame *frame)
 {
@@ -338,11 +351,11 @@ static size_t build_balance_config_ack(uint8_t type, uint8_t seq,
 {
     const BalanceTelemetry *telemetry = balance_control_get_telemetry();
     BalanceRuntimeConfig config;
-    uint8_t payload[32];
+    uint8_t payload[40];
 
     memset(payload, 0, sizeof(payload));
     balance_control_get_runtime_config(&config);
-    payload[0] = 2U;
+    payload[0] = 3U;
     payload[1] = status;
     payload[2] = telemetry->state;
     write_be_i32(&payload[4], float_to_i32(config.pitch_trim_rad, 1000000.0f));
@@ -354,7 +367,29 @@ static size_t build_balance_config_ack(uint8_t type, uint8_t seq,
                  float_to_i32(config.posture_priority_angle_rad, 1000000.0f));
     write_be_i32(&payload[28],
                  float_to_i32(config.max_wheel_speed_m_s, 1000000.0f));
+    write_be_i32(&payload[32],
+                 float_to_i32(config.motor_feedback_speed_scale, 1000000.0f));
+    write_be_i32(&payload[36],
+                 float_to_i32(config.pitch_rate_filter_hz, 1000000.0f));
     return rpmsg_encode(type, seq, payload, sizeof(payload), out, out_size);
+}
+
+static size_t build_speed_diag_ack(uint8_t seq, uint8_t *out,
+                                   size_t out_size)
+{
+    uint8_t payload[24];
+
+    memset(payload, 0, sizeof(payload));
+    payload[0] = 1U;
+    payload[1] = g_speed_diag.status;
+    payload[2] = g_speed_diag.motor_id;
+    payload[3] = g_speed_diag.valid_flags;
+    write_be_i32(&payload[4], g_speed_diag.periodic_speed_x100_rpm);
+    write_be_i32(&payload[8], g_speed_diag.register_speed_x100_rpm);
+    write_be_i32(&payload[12], g_speed_diag.position_speed_x100_rpm);
+    write_be_u32(&payload[16], g_speed_diag.sample_count);
+    return rpmsg_encode(CMD_CAN_SPEED_DIAG, seq, payload, sizeof(payload),
+                        out, out_size);
 }
 
 static void update_torque_test_peak(uint8_t motor_id)
@@ -486,6 +521,132 @@ static void handle_can_motor_fault(const uint8_t *payload, uint8_t length)
     g_motor_fault_read_ret = -3;
 }
 
+static int32_t position_delta_speed_x100_rpm(
+    const MotorFeedback *previous, const MotorFeedback *current)
+{
+    int64_t delta_position;
+    uint64_t delta_ticks;
+    uint64_t timer_frequency = GenericTimerFrequecy();
+
+    if (timer_frequency == 0U || current->update_tick <= previous->update_tick) {
+        return 0;
+    }
+    delta_position = (int64_t)current->position_x100_deg -
+                     (int64_t)previous->position_x100_deg;
+    delta_ticks = current->update_tick - previous->update_tick;
+
+    /* x100 deg -> x100 rpm: delta * timer_hz / (6 * delta_ticks). */
+    return (int32_t)(delta_position * (int64_t)timer_frequency /
+                     (6LL * (int64_t)delta_ticks));
+}
+
+static void handle_can_speed_diag(const uint8_t *payload, uint8_t length)
+{
+    const BalanceTelemetry *balance = balance_control_get_telemetry();
+    MotorCanFrame frame;
+    MotorFeedback previous = {0};
+    MotorFeedback current;
+    MotorRegisterValue register_value;
+    uint8_t motor_id;
+    int16_t torque_x100_nm;
+    uint16_t duration_ms;
+    int32_t latest_position_speed = 0;
+
+    memset(&g_speed_diag, 0, sizeof(g_speed_diag));
+    g_speed_diag.status = 1U;
+    if (length < 5U || balance->state == BALANCE_STATE_ACTIVE ||
+        balance->state == BALANCE_STATE_ARMING) {
+        return;
+    }
+    motor_id = payload[0];
+    torque_x100_nm = (int16_t)read_be_u16(&payload[1]);
+    duration_ms = read_be_u16(&payload[3]);
+    g_speed_diag.motor_id = motor_id;
+    if (motor_id < 1U || motor_id > 2U || torque_x100_nm < -10 ||
+        torque_x100_nm > 10 || duration_ms < 200U || duration_ms > 2000U) {
+        return;
+    }
+
+    balance_control_disable();
+    phytium_can_clear_motor_feedback(motor_id);
+    motor_build_set_mode(motor_id, 0U, &frame);
+    if (send_motor_frame(&frame) != 0) {
+        g_speed_diag.status = 2U;
+        return;
+    }
+    fsleep_millisec(5U);
+    motor_build_enable(motor_id, &frame);
+    if (send_motor_frame(&frame) != 0) {
+        g_speed_diag.status = 2U;
+        return;
+    }
+    fsleep_millisec(5U);
+
+    for (uint16_t elapsed = 0U; elapsed < duration_ms; elapsed += 10U) {
+        motor_build_torque(motor_id, torque_x100_nm, &frame);
+        if (send_motor_frame(&frame) != 0) {
+            g_speed_diag.status = 2U;
+            break;
+        }
+        fsleep_millisec(2U);
+        (void)phytium_can_poll();
+        if (phytium_can_get_motor_feedback(motor_id, &current) == 0 &&
+            (!previous.valid || current.update_tick != previous.update_tick)) {
+            if (previous.valid) {
+                latest_position_speed =
+                    position_delta_speed_x100_rpm(&previous, &current);
+                g_speed_diag.valid_flags |= 0x04U;
+            }
+            previous = current;
+            g_speed_diag.sample_count++;
+            g_speed_diag.valid_flags |= 0x01U;
+        }
+
+        if ((elapsed % 50U) == 0U) {
+            phytium_can_clear_register_value(motor_id);
+            motor_build_read_u32(motor_id, 0x0006U, &frame);
+            if (send_motor_frame(&frame) == 0) {
+                for (uint32_t wait_ms = 0U; wait_ms < 8U; ++wait_ms) {
+                    fsleep_millisec(1U);
+                    (void)phytium_can_poll();
+                    if (phytium_can_get_register_value(motor_id,
+                                                       &register_value) == 0 &&
+                        register_value.address == 0x0006U) {
+                        int32_t periodic = previous.valid ?
+                            (int32_t)previous.speed_rpm * 100 : 0;
+                        int32_t magnitude = periodic < 0 ? -periodic : periodic;
+                        int32_t best = g_speed_diag.periodic_speed_x100_rpm < 0 ?
+                            -g_speed_diag.periodic_speed_x100_rpm :
+                            g_speed_diag.periodic_speed_x100_rpm;
+
+                        if ((g_speed_diag.valid_flags & 0x04U) != 0U &&
+                            magnitude >= best) {
+                            g_speed_diag.periodic_speed_x100_rpm = periodic;
+                            g_speed_diag.register_speed_x100_rpm =
+                                (int32_t)register_value.value;
+                            g_speed_diag.position_speed_x100_rpm =
+                                latest_position_speed;
+                        }
+                        g_speed_diag.valid_flags |= 0x02U;
+                        break;
+                    }
+                }
+            }
+        } else {
+            fsleep_millisec(8U);
+        }
+    }
+
+    motor_build_torque(motor_id, 0, &frame);
+    (void)send_motor_frame(&frame);
+    fsleep_millisec(5U);
+    motor_build_idle(motor_id, &frame);
+    (void)send_motor_frame(&frame);
+    if (g_speed_diag.status != 2U) {
+        g_speed_diag.status = g_speed_diag.valid_flags == 0x07U ? 0U : 3U;
+    }
+}
+
 int slave_app_init(void)
 {
     return balance_control_init();
@@ -537,6 +698,9 @@ size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply,
     case CMD_CAN_MOTOR_FAULT:
         handle_can_motor_fault(frame.payload, frame.length);
         return build_ack(frame.seq, reply, reply_size);
+    case CMD_CAN_SPEED_DIAG:
+        handle_can_speed_diag(frame.payload, frame.length);
+        return build_speed_diag_ack(frame.seq, reply, reply_size);
     case CMD_CAN_SET_ORIGIN:
         if (frame.length >= 1) {
             handle_can_set_origin(frame.payload[0]);
