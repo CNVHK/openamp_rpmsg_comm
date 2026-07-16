@@ -44,6 +44,7 @@ typedef struct {
     float k_position;
     float k_velocity;
     float posture_priority_angle_rad;
+    float max_wheel_speed_m_s;
 } BalanceRuntimeConfig;
 
 enum {
@@ -62,5 +63,6 @@ int balance_control_set_pitch_trim(float pitch_trim_rad);
 int balance_control_set_gains(float k_theta, float k_theta_rate,
                               float k_position, float k_velocity);
 int balance_control_reset_runtime_config(void);
+int balance_control_set_speed_limit(float max_wheel_speed_m_s);
 
 #endif

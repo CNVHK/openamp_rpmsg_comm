@@ -98,6 +98,19 @@ rprun balance-disable
 rprun balance-config
 ```
 
+设置运行时单轮硬超速保护阈值，单位为 `m/s`，允许范围为 `0.5–1.5`。
+默认值仍为 `1.0 m/s`，建议按 `1.2`、`1.5` 的顺序逐步测试：
+
+```bash
+rprun balance-disable
+rprun balance-speed-limit 1.2
+rprun balance-config
+rprun balance-enable
+```
+
+轮径 `0.03225 m` 时，`1.2 m/s` 约为 `355 rpm`，`1.5 m/s` 约为
+`444 rpm`。该命令不会修改静止使能条件的低速门槛，也不能关闭超速保护。
+
 `balance-trim` 设置机器人处于真实机械直立位置时 IMU 应扣除的俯仰角，
 单位为度，允许范围为 `-5` 到 `+5` 度。例如机械直立时状态显示
 `pitch=+1.0 deg`：

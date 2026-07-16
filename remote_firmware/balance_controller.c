@@ -20,7 +20,9 @@
 #define BALANCE_ARM_MAX_WHEEL_SPEED_M_S 0.10f
 #define BALANCE_ARM_MAX_PITCH_RAD (5.0f * BALANCE_PI / 180.0f)
 #define BALANCE_ARM_MAX_PITCH_RATE_RAD_S 0.15f
-#define BALANCE_MAX_WHEEL_SPEED_M_S 1.0f
+#define BALANCE_DEFAULT_MAX_WHEEL_SPEED_M_S 1.0f
+#define BALANCE_MIN_CONFIG_WHEEL_SPEED_M_S 0.5f
+#define BALANCE_MAX_CONFIG_WHEEL_SPEED_M_S 1.5f
 #define BALANCE_PI 3.14159265358979323846f
 #define BALANCE_IMU_MOUNT_PITCH_RAD 0.0f
 #define BALANCE_POSTURE_PRIORITY_ANGLE_RAD (3.0f * BALANCE_PI / 180.0f)
@@ -32,6 +34,7 @@ static uint64_t g_timer_frequency;
 static uint64_t g_period_ticks;
 static uint64_t g_next_tick;
 static uint64_t g_arm_tick;
+static float g_max_wheel_speed_m_s = BALANCE_DEFAULT_MAX_WHEEL_SPEED_M_S;
 
 static const LqrConfig g_default_lqr_config = {
     /* 100 Hz discrete LQR; input is tau_left + tau_right in N*m. */
@@ -320,9 +323,9 @@ void balance_control_poll(void)
         return;
     }
     if (fabsf(sensor.left_velocity_rad_s * g_lqr.config.wheel_radius_m) >
-            BALANCE_MAX_WHEEL_SPEED_M_S ||
+            g_max_wheel_speed_m_s ||
         fabsf(sensor.right_velocity_rad_s * g_lqr.config.wheel_radius_m) >
-            BALANCE_MAX_WHEEL_SPEED_M_S) {
+            g_max_wheel_speed_m_s) {
         enter_fault(BALANCE_FAULT_SPEED);
         return;
     }
@@ -358,6 +361,7 @@ void balance_control_get_runtime_config(BalanceRuntimeConfig *config)
     config->k_velocity = g_lqr.config.k_velocity;
     config->posture_priority_angle_rad =
         g_lqr.config.posture_priority_angle_rad;
+    config->max_wheel_speed_m_s = g_max_wheel_speed_m_s;
 }
 
 int balance_control_set_pitch_trim(float pitch_trim_rad)
@@ -400,5 +404,20 @@ int balance_control_reset_runtime_config(void)
         return BALANCE_CONFIG_BUSY;
     }
     g_lqr.config = g_default_lqr_config;
+    g_max_wheel_speed_m_s = BALANCE_DEFAULT_MAX_WHEEL_SPEED_M_S;
+    return BALANCE_CONFIG_OK;
+}
+
+int balance_control_set_speed_limit(float max_wheel_speed_m_s)
+{
+    if (!config_change_allowed()) {
+        return BALANCE_CONFIG_BUSY;
+    }
+    if (!isfinite(max_wheel_speed_m_s) ||
+        max_wheel_speed_m_s < BALANCE_MIN_CONFIG_WHEEL_SPEED_M_S ||
+        max_wheel_speed_m_s > BALANCE_MAX_CONFIG_WHEEL_SPEED_M_S) {
+        return BALANCE_CONFIG_INVALID;
+    }
+    g_max_wheel_speed_m_s = max_wheel_speed_m_s;
     return BALANCE_CONFIG_OK;
 }

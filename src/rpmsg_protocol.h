@@ -31,7 +31,8 @@ typedef enum {
     CMD_BALANCE_SET_TRIM = 53,
     CMD_BALANCE_SET_GAINS = 54,
     CMD_BALANCE_CONFIG = 55,
-    CMD_BALANCE_RESET_CONFIG = 56
+    CMD_BALANCE_RESET_CONFIG = 56,
+    CMD_BALANCE_SET_SPEED_LIMIT = 57
 } CommandType;
 
 typedef struct {

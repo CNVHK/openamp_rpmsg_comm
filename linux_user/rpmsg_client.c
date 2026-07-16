@@ -9,7 +9,7 @@
 #include <sys/select.h>
 #include <unistd.h>
 
-#define RPMSG_CLIENT_VERSION "0.15.0-lqr-runtime-config"
+#define RPMSG_CLIENT_VERSION "0.16.0-lqr-speed-limit"
 #define RAD_PER_DEG 0.017453292519943295f
 
 static int wait_readable(int fd, int timeout_ms)
@@ -131,6 +131,7 @@ static void usage(const char *prog)
     printf("  %s <rpmsg_dev> balance-gains <k_theta> <k_theta_rate> <k_position> <k_velocity>\n", prog);
     printf("  %s <rpmsg_dev> balance-config\n", prog);
     printf("  %s <rpmsg_dev> balance-reset-config\n", prog);
+    printf("  %s <rpmsg_dev> balance-speed-limit <m_s>\n", prog);
     printf("  %s <rpmsg_dev> pvt <motor_id> <pos_x100_deg> <speed_rpm> <torque_percent>\n", prog);
     printf("  %s <rpmsg_dev> stop [motor_id]\n", prog);
     printf("\nExamples:\n");
@@ -148,6 +149,7 @@ static void usage(const char *prog)
     printf("  %s /dev/rpmsg0 balance-disable\n", prog);
     printf("  %s /dev/rpmsg0 balance-trim 1.0\n", prog);
     printf("  %s /dev/rpmsg0 balance-config\n", prog);
+    printf("  %s /dev/rpmsg0 balance-speed-limit 1.2\n", prog);
     printf("  %s /dev/rpmsg0 enable 1\n", prog);
     printf("  %s /dev/rpmsg0 pvt 1 1000 100 20\n", prog);
     printf("  %s /dev/rpmsg0 stop 1\n", prog);
@@ -369,6 +371,22 @@ static int build_command(int argc, char **argv, uint8_t *type, uint8_t *payload,
         return 0;
     }
 
+    if (strcmp(cmd, "balance-speed-limit") == 0) {
+        char *end = NULL;
+        float speed_limit;
+
+        if (argc < 4) return -1;
+        speed_limit = strtof(argv[3], &end);
+        if (end == argv[3] || *end != '\0' || !isfinite(speed_limit) ||
+            speed_limit < 0.5f || speed_limit > 1.5f) {
+            return -1;
+        }
+        *type = CMD_BALANCE_SET_SPEED_LIMIT;
+        put_be_i32(payload, scaled_i32(speed_limit, 1000000.0f));
+        *payload_len = 4U;
+        return 0;
+    }
+
     if (strcmp(cmd, "pvt") == 0) {
         if (argc < 7) return -1;
         *type = CMD_CAN_PVT;
@@ -459,14 +477,15 @@ int main(int argc, char **argv)
     }
 
     printf("ack type=%u seq=%u payload_len=%u\n", ack.type, ack.seq, ack.length);
-    if (type >= CMD_BALANCE_SET_TRIM && type <= CMD_BALANCE_RESET_CONFIG) {
+    if (type >= CMD_BALANCE_SET_TRIM &&
+        type <= CMD_BALANCE_SET_SPEED_LIMIT) {
         static const char *const status_names[] = {
             "ok", "invalid", "busy"
         };
         uint8_t status;
         const char *status_name;
 
-        if (ack.length < 28U || ack.payload[0] != 1U) {
+        if (ack.length < 32U || ack.payload[0] != 2U) {
             printf("invalid balance config reply\n");
             close(fd);
             return 3;
@@ -487,6 +506,10 @@ int main(int argc, char **argv)
         printf("posture priority angle: %.6f deg\n",
                (double)read_be_i32(&ack.payload[24]) / 1000000.0 /
                    RAD_PER_DEG);
+        printf("wheel speed limit: %.6f m/s (%.1f rpm)\n",
+               (double)read_be_i32(&ack.payload[28]) / 1000000.0,
+               (double)read_be_i32(&ack.payload[28]) / 1000000.0 /
+                   0.03225 * 60.0 / (2.0 * 3.14159265358979323846));
         close(fd);
         return status == 0U ? 0 : 4;
     }

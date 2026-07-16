@@ -42,11 +42,26 @@ static void test_balance_gain_frame(void)
     assert(frame.length == sizeof(payload));
 }
 
+static void test_balance_speed_limit_frame(void)
+{
+    uint8_t payload[4] = {0, 18, 79, 128};
+    uint8_t buffer[16];
+    RpmsgFrame frame;
+    size_t size = rpmsg_encode(CMD_BALANCE_SET_SPEED_LIMIT, 4, payload,
+                               sizeof(payload), buffer, sizeof(buffer));
+
+    assert(size == 9);
+    assert(rpmsg_decode(buffer, size, &frame));
+    assert(frame.type == CMD_BALANCE_SET_SPEED_LIMIT);
+    assert(frame.length == sizeof(payload));
+}
+
 int main(void)
 {
     test_encode_decode();
     test_bad_checksum();
     test_balance_gain_frame();
+    test_balance_speed_limit_frame();
     printf("rpmsg protocol tests passed\n");
     return 0;
 }
