@@ -21,13 +21,19 @@
 #define BALANCE_ARM_MAX_PITCH_RAD (5.0f * BALANCE_PI / 180.0f)
 #define BALANCE_ARM_MAX_PITCH_RATE_RAD_S 0.15f
 #define BALANCE_DEFAULT_MAX_WHEEL_SPEED_M_S 1.0f
-#define BALANCE_MIN_CONFIG_WHEEL_SPEED_M_S 0.5f
-#define BALANCE_MAX_CONFIG_WHEEL_SPEED_M_S 1.5f
+#define BALANCE_MIN_CONFIG_WHEEL_SPEED_M_S 0.2f
+#define BALANCE_MAX_CONFIG_WHEEL_SPEED_M_S 2.0f
 #define BALANCE_PI 3.14159265358979323846f
 #define BALANCE_MOTOR_FEEDBACK_SPEED_SCALE 1.0f
-#define BALANCE_PITCH_RATE_FILTER_HZ 10.0f
+#define BALANCE_DEFAULT_PITCH_RATE_FILTER_HZ 20.0f
+#define BALANCE_MIN_PITCH_RATE_FILTER_HZ 5.0f
+#define BALANCE_MAX_PITCH_RATE_FILTER_HZ 40.0f
 #define BALANCE_IMU_MOUNT_PITCH_RAD 0.0f
 #define BALANCE_POSTURE_PRIORITY_ANGLE_RAD (3.0f * BALANCE_PI / 180.0f)
+#define BALANCE_MIN_POSTURE_PRIORITY_ANGLE_RAD (1.0f * BALANCE_PI / 180.0f)
+#define BALANCE_MAX_POSTURE_PRIORITY_ANGLE_RAD (10.0f * BALANCE_PI / 180.0f)
+#define BALANCE_MIN_TORQUE_LIMIT_NM 0.05f
+#define BALANCE_MAX_TORQUE_LIMIT_NM 0.30f
 #define BALANCE_MAX_PITCH_TRIM_RAD (5.0f * BALANCE_PI / 180.0f)
 
 static LqrController g_lqr;
@@ -37,13 +43,14 @@ static uint64_t g_period_ticks;
 static uint64_t g_next_tick;
 static uint64_t g_arm_tick;
 static float g_max_wheel_speed_m_s = BALANCE_DEFAULT_MAX_WHEEL_SPEED_M_S;
+static float g_pitch_rate_filter_hz = BALANCE_DEFAULT_PITCH_RATE_FILTER_HZ;
 static float g_filtered_pitch_rate_rad_s;
 static uint8_t g_pitch_rate_filter_valid;
 
 static const LqrConfig g_default_lqr_config = {
     /* 100 Hz discrete LQR; input is tau_left + tau_right in N*m. */
     .k_theta = -3.759673794f,
-    .k_theta_rate = -0.400000000f,
+    .k_theta_rate = -0.486784559f,
     .k_position = -0.062456846f,
     .k_velocity = -0.247058408f,
     .wheel_radius_m = 0.03225f,
@@ -163,7 +170,7 @@ static int read_lqr_sensor(uint64_t now, LqrSensorData *sensor,
 static float filter_pitch_rate(float pitch_rate_rad_s)
 {
     const float dt = 1.0f / (float)BALANCE_CONTROL_HZ;
-    const float rc = 1.0f / (2.0f * BALANCE_PI * BALANCE_PITCH_RATE_FILTER_HZ);
+    const float rc = 1.0f / (2.0f * BALANCE_PI * g_pitch_rate_filter_hz);
     const float alpha = dt / (rc + dt);
 
     if (!g_pitch_rate_filter_valid) {
@@ -390,7 +397,8 @@ void balance_control_get_runtime_config(BalanceRuntimeConfig *config)
         g_lqr.config.posture_priority_angle_rad;
     config->max_wheel_speed_m_s = g_max_wheel_speed_m_s;
     config->motor_feedback_speed_scale = BALANCE_MOTOR_FEEDBACK_SPEED_SCALE;
-    config->pitch_rate_filter_hz = BALANCE_PITCH_RATE_FILTER_HZ;
+    config->pitch_rate_filter_hz = g_pitch_rate_filter_hz;
+    config->torque_limit_nm = g_lqr.config.torque_limit_nm;
 }
 
 int balance_control_set_pitch_trim(float pitch_trim_rad)
@@ -434,6 +442,8 @@ int balance_control_reset_runtime_config(void)
     }
     g_lqr.config = g_default_lqr_config;
     g_max_wheel_speed_m_s = BALANCE_DEFAULT_MAX_WHEEL_SPEED_M_S;
+    g_pitch_rate_filter_hz = BALANCE_DEFAULT_PITCH_RATE_FILTER_HZ;
+    g_pitch_rate_filter_valid = 0U;
     return BALANCE_CONFIG_OK;
 }
 
@@ -448,5 +458,48 @@ int balance_control_set_speed_limit(float max_wheel_speed_m_s)
         return BALANCE_CONFIG_INVALID;
     }
     g_max_wheel_speed_m_s = max_wheel_speed_m_s;
+    return BALANCE_CONFIG_OK;
+}
+
+int balance_control_set_pitch_rate_filter(float cutoff_hz)
+{
+    if (!config_change_allowed()) {
+        return BALANCE_CONFIG_BUSY;
+    }
+    if (!isfinite(cutoff_hz) ||
+        cutoff_hz < BALANCE_MIN_PITCH_RATE_FILTER_HZ ||
+        cutoff_hz > BALANCE_MAX_PITCH_RATE_FILTER_HZ) {
+        return BALANCE_CONFIG_INVALID;
+    }
+    g_pitch_rate_filter_hz = cutoff_hz;
+    g_pitch_rate_filter_valid = 0U;
+    return BALANCE_CONFIG_OK;
+}
+
+int balance_control_set_posture_priority(float angle_rad)
+{
+    if (!config_change_allowed()) {
+        return BALANCE_CONFIG_BUSY;
+    }
+    if (!isfinite(angle_rad) ||
+        angle_rad < BALANCE_MIN_POSTURE_PRIORITY_ANGLE_RAD ||
+        angle_rad > BALANCE_MAX_POSTURE_PRIORITY_ANGLE_RAD) {
+        return BALANCE_CONFIG_INVALID;
+    }
+    g_lqr.config.posture_priority_angle_rad = angle_rad;
+    return BALANCE_CONFIG_OK;
+}
+
+int balance_control_set_torque_limit(float torque_limit_nm)
+{
+    if (!config_change_allowed()) {
+        return BALANCE_CONFIG_BUSY;
+    }
+    if (!isfinite(torque_limit_nm) ||
+        torque_limit_nm < BALANCE_MIN_TORQUE_LIMIT_NM ||
+        torque_limit_nm > BALANCE_MAX_TORQUE_LIMIT_NM) {
+        return BALANCE_CONFIG_INVALID;
+    }
+    g_lqr.config.torque_limit_nm = torque_limit_nm;
     return BALANCE_CONFIG_OK;
 }

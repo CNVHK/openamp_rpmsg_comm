@@ -84,6 +84,27 @@ static void test_balance_telemetry_frame(void)
     assert(BALANCE_TELEMETRY_PAYLOAD_SIZE == 44U);
 }
 
+static void test_balance_runtime_tuning_frames(void)
+{
+    const uint8_t commands[] = {
+        CMD_BALANCE_SET_FILTER,
+        CMD_BALANCE_SET_POSTURE_PRIORITY,
+        CMD_BALANCE_SET_TORQUE_LIMIT
+    };
+    uint8_t payload[4] = {0, 0, 0, 0};
+    uint8_t buffer[16];
+    RpmsgFrame frame;
+
+    for (size_t i = 0; i < sizeof(commands); ++i) {
+        size_t size = rpmsg_encode(commands[i], (uint8_t)(7U + i), payload,
+                                   sizeof(payload), buffer, sizeof(buffer));
+        assert(size == 9U);
+        assert(rpmsg_decode(buffer, size, &frame));
+        assert(frame.type == commands[i]);
+        assert(frame.length == sizeof(payload));
+    }
+}
+
 int main(void)
 {
     test_encode_decode();
@@ -92,6 +113,7 @@ int main(void)
     test_balance_speed_limit_frame();
     test_motor_speed_diag_frame();
     test_balance_telemetry_frame();
+    test_balance_runtime_tuning_frames();
     printf("rpmsg protocol tests passed\n");
     return 0;
 }

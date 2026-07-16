@@ -9,7 +9,7 @@
 #include <sys/select.h>
 #include <unistd.h>
 
-#define RPMSG_CLIENT_VERSION "0.17.1-lqr-speed-verified"
+#define RPMSG_CLIENT_VERSION "0.18.0-lqr-runtime-tuning"
 #define RAD_PER_DEG 0.017453292519943295f
 
 static int wait_readable(int fd, int timeout_ms)
@@ -132,7 +132,10 @@ static void usage(const char *prog)
     printf("  %s <rpmsg_dev> balance-gains <k_theta> <k_theta_rate> <k_position> <k_velocity>\n", prog);
     printf("  %s <rpmsg_dev> balance-config\n", prog);
     printf("  %s <rpmsg_dev> balance-reset-config\n", prog);
-    printf("  %s <rpmsg_dev> balance-speed-limit <m_s>\n", prog);
+    printf("  %s <rpmsg_dev> balance-speed-limit <0.2..2.0_m_s>\n", prog);
+    printf("  %s <rpmsg_dev> balance-filter <5..40_hz>\n", prog);
+    printf("  %s <rpmsg_dev> balance-posture-angle <1..10_deg>\n", prog);
+    printf("  %s <rpmsg_dev> balance-torque-limit <0.05..0.30_nm>\n", prog);
     printf("  %s <rpmsg_dev> pvt <motor_id> <pos_x100_deg> <speed_rpm> <torque_percent>\n", prog);
     printf("  %s <rpmsg_dev> stop [motor_id]\n", prog);
     printf("\nExamples:\n");
@@ -151,6 +154,9 @@ static void usage(const char *prog)
     printf("  %s /dev/rpmsg0 balance-trim 1.0\n", prog);
     printf("  %s /dev/rpmsg0 balance-config\n", prog);
     printf("  %s /dev/rpmsg0 balance-speed-limit 1.2\n", prog);
+    printf("  %s /dev/rpmsg0 balance-filter 20\n", prog);
+    printf("  %s /dev/rpmsg0 balance-posture-angle 3\n", prog);
+    printf("  %s /dev/rpmsg0 balance-torque-limit 0.22\n", prog);
     printf("  %s /dev/rpmsg0 enable 1\n", prog);
     printf("  %s /dev/rpmsg0 pvt 1 1000 100 20\n", prog);
     printf("  %s /dev/rpmsg0 stop 1\n", prog);
@@ -415,11 +421,60 @@ static int build_command(int argc, char **argv, uint8_t *type, uint8_t *payload,
         if (argc < 4) return -1;
         speed_limit = strtof(argv[3], &end);
         if (end == argv[3] || *end != '\0' || !isfinite(speed_limit) ||
-            speed_limit < 0.5f || speed_limit > 1.5f) {
+            speed_limit < 0.2f || speed_limit > 2.0f) {
             return -1;
         }
         *type = CMD_BALANCE_SET_SPEED_LIMIT;
         put_be_i32(payload, scaled_i32(speed_limit, 1000000.0f));
+        *payload_len = 4U;
+        return 0;
+    }
+
+    if (strcmp(cmd, "balance-filter") == 0) {
+        char *end = NULL;
+        float cutoff_hz;
+
+        if (argc < 4) return -1;
+        cutoff_hz = strtof(argv[3], &end);
+        if (end == argv[3] || *end != '\0' || !isfinite(cutoff_hz) ||
+            cutoff_hz < 5.0f || cutoff_hz > 40.0f) {
+            return -1;
+        }
+        *type = CMD_BALANCE_SET_FILTER;
+        put_be_i32(payload, scaled_i32(cutoff_hz, 1000000.0f));
+        *payload_len = 4U;
+        return 0;
+    }
+
+    if (strcmp(cmd, "balance-posture-angle") == 0) {
+        char *end = NULL;
+        float angle_deg;
+
+        if (argc < 4) return -1;
+        angle_deg = strtof(argv[3], &end);
+        if (end == argv[3] || *end != '\0' || !isfinite(angle_deg) ||
+            angle_deg < 1.0f || angle_deg > 10.0f) {
+            return -1;
+        }
+        *type = CMD_BALANCE_SET_POSTURE_PRIORITY;
+        put_be_i32(payload,
+                   scaled_i32(angle_deg * RAD_PER_DEG, 1000000.0f));
+        *payload_len = 4U;
+        return 0;
+    }
+
+    if (strcmp(cmd, "balance-torque-limit") == 0) {
+        char *end = NULL;
+        float torque_limit_nm;
+
+        if (argc < 4) return -1;
+        torque_limit_nm = strtof(argv[3], &end);
+        if (end == argv[3] || *end != '\0' || !isfinite(torque_limit_nm) ||
+            torque_limit_nm < 0.05f || torque_limit_nm > 0.30f) {
+            return -1;
+        }
+        *type = CMD_BALANCE_SET_TORQUE_LIMIT;
+        put_be_i32(payload, scaled_i32(torque_limit_nm, 1000000.0f));
         *payload_len = 4U;
         return 0;
     }
@@ -549,8 +604,10 @@ int main(int argc, char **argv)
         close(fd);
         return status == 0U ? 0 : 4;
     }
-    if (type >= CMD_BALANCE_SET_TRIM &&
-        type <= CMD_BALANCE_SET_SPEED_LIMIT) {
+    if ((type >= CMD_BALANCE_SET_TRIM &&
+         type <= CMD_BALANCE_SET_SPEED_LIMIT) ||
+        (type >= CMD_BALANCE_SET_FILTER &&
+         type <= CMD_BALANCE_SET_TORQUE_LIMIT)) {
         static const char *const status_names[] = {
             "ok", "invalid", "busy"
         };
@@ -587,6 +644,10 @@ int main(int argc, char **argv)
                    (double)read_be_i32(&ack.payload[32]) / 1000000.0);
             printf("pitch-rate low-pass cutoff: %.3f Hz\n",
                    (double)read_be_i32(&ack.payload[36]) / 1000000.0);
+        }
+        if (ack.length >= 44U && ack.payload[0] >= 4U) {
+            printf("single-wheel torque limit: %.6f Nm\n",
+                   (double)read_be_i32(&ack.payload[40]) / 1000000.0);
         }
         close(fd);
         return status == 0U ? 0 : 4;

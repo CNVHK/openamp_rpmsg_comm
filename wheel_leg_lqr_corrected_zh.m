@@ -40,7 +40,7 @@ cfg.wheel_inertia = ...
 % 必须与从核固件完全一致。
 cfg.control_hz = 100;
 cfg.Ts = 1 / cfg.control_hz;
-cfg.pitch_rate_filter_hz = 10.0;
+cfg.pitch_rate_filter_hz = 20.0;
 cfg.posture_priority_angle_deg = 3.0;
 
 % 当前电机协议和固件限制。

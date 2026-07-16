@@ -351,11 +351,11 @@ static size_t build_balance_config_ack(uint8_t type, uint8_t seq,
 {
     const BalanceTelemetry *telemetry = balance_control_get_telemetry();
     BalanceRuntimeConfig config;
-    uint8_t payload[40];
+    uint8_t payload[44];
 
     memset(payload, 0, sizeof(payload));
     balance_control_get_runtime_config(&config);
-    payload[0] = 3U;
+    payload[0] = 4U;
     payload[1] = status;
     payload[2] = telemetry->state;
     write_be_i32(&payload[4], float_to_i32(config.pitch_trim_rad, 1000000.0f));
@@ -371,6 +371,8 @@ static size_t build_balance_config_ack(uint8_t type, uint8_t seq,
                  float_to_i32(config.motor_feedback_speed_scale, 1000000.0f));
     write_be_i32(&payload[36],
                  float_to_i32(config.pitch_rate_filter_hz, 1000000.0f));
+    write_be_i32(&payload[40],
+                 float_to_i32(config.torque_limit_nm, 1000000.0f));
     return rpmsg_encode(type, seq, payload, sizeof(payload), out, out_size);
 }
 
@@ -799,6 +801,33 @@ size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply,
         int status = BALANCE_CONFIG_INVALID;
         if (frame.length >= 4U) {
             status = balance_control_set_speed_limit(
+                (float)read_be_i32(frame.payload) / 1000000.0f);
+        }
+        return build_balance_config_ack(frame.type, frame.seq, (uint8_t)status,
+                                        reply, reply_size);
+    }
+    case CMD_BALANCE_SET_FILTER: {
+        int status = BALANCE_CONFIG_INVALID;
+        if (frame.length >= 4U) {
+            status = balance_control_set_pitch_rate_filter(
+                (float)read_be_i32(frame.payload) / 1000000.0f);
+        }
+        return build_balance_config_ack(frame.type, frame.seq, (uint8_t)status,
+                                        reply, reply_size);
+    }
+    case CMD_BALANCE_SET_POSTURE_PRIORITY: {
+        int status = BALANCE_CONFIG_INVALID;
+        if (frame.length >= 4U) {
+            status = balance_control_set_posture_priority(
+                (float)read_be_i32(frame.payload) / 1000000.0f);
+        }
+        return build_balance_config_ack(frame.type, frame.seq, (uint8_t)status,
+                                        reply, reply_size);
+    }
+    case CMD_BALANCE_SET_TORQUE_LIMIT: {
+        int status = BALANCE_CONFIG_INVALID;
+        if (frame.length >= 4U) {
+            status = balance_control_set_torque_limit(
                 (float)read_be_i32(frame.payload) / 1000000.0f);
         }
         return build_balance_config_ack(frame.type, frame.seq, (uint8_t)status,

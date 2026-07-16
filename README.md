@@ -89,8 +89,9 @@ sudo ./rpmsg_client /dev/rpmsg0 stop 1
 
 ## 平衡控制运行时配置
 
-从核固件支持在不重新编译 ELF 的情况下修改俯仰零点和四个 LQR
-增益。配置保存在从核 RAM 中，重启从核后恢复固件默认值。所有修改命令
+从核固件支持在不重新编译 ELF 的情况下修改俯仰零点、四个 LQR 增益、
+角速度滤波、姿态优先角、轮速保护和单轮力矩限制。配置保存在从核 RAM 中，
+重启从核后恢复固件默认值。所有修改命令
 只能在 `disabled` 或 `fault` 状态执行，先停止平衡控制：
 
 ```bash
@@ -98,8 +99,8 @@ rprun balance-disable
 rprun balance-config
 ```
 
-设置运行时单轮硬超速保护阈值，单位为 `m/s`，允许范围为 `0.5–1.5`。
-默认值仍为 `1.0 m/s`，建议按 `1.2`、`1.5` 的顺序逐步测试：
+设置运行时单轮硬超速保护阈值，单位为 `m/s`，允许范围为 `0.2–2.0`。
+默认值仍为 `1.0 m/s`：
 
 ```bash
 rprun balance-disable
@@ -108,8 +109,9 @@ rprun balance-config
 rprun balance-enable
 ```
 
-轮径 `0.03225 m` 时，`1.2 m/s` 约为 `355 rpm`，`1.5 m/s` 约为
-`444 rpm`。该命令不会修改静止使能条件的低速门槛，也不能关闭超速保护。
+轮径 `0.03225 m` 时，`1.2 m/s` 约为 `355 rpm`。该命令不会修改静止
+使能条件的低速门槛，也不能关闭超速保护。超过默认值只用于有保护绳的诊断，
+不能用来掩盖发散或振荡。
 
 `balance-trim` 设置机器人处于真实机械直立位置时 IMU 应扣除的俯仰角，
 单位为度，允许范围为 `-5` 到 `+5` 度。例如机械直立时状态显示
@@ -123,13 +125,38 @@ rprun balance-config
 设置四个直接总力矩 LQR 增益：
 
 ```bash
-rprun balance-gains -3.759674 -0.400000 -0.062457 -0.247058
+rprun balance-gains -3.759674 -0.486785 -0.062457 -0.247058
 rprun balance-config
 ```
 
 增益顺序固定为 `K_theta K_theta_rate K_position K_velocity`。固件只接受
 与当前模型符号一致的有限范围参数，但范围检查不能证明参数一定稳定；新参数
-必须架设保护绳并从小倾角开始验证。恢复编译默认配置：
+必须架设保护绳并从小倾角开始验证。
+
+设置俯仰角速度一阶低通截止频率，允许 `5–40 Hz`，默认 `20 Hz`：
+
+```bash
+rprun balance-disable
+rprun balance-filter 20
+rprun balance-config
+```
+
+设置姿态优先角，允许 `1–10` 度，默认 `3` 度：
+
+```bash
+rprun balance-posture-angle 3
+```
+
+设置单轮力矩限制，允许 `0.05–0.30 N*m`，默认 `0.22 N*m`：
+
+```bash
+rprun balance-torque-limit 0.22
+```
+
+`0.22 N*m` 以上只用于确认电机、驱动器、电池和机械结构均允许更高输出后的
+短时保护绳测试。提高该限制会增加电机电流、跌倒冲击和机械损坏风险。
+
+恢复编译默认配置：
 
 ```bash
 rprun balance-reset-config
