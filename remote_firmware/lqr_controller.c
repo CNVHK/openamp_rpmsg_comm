@@ -77,8 +77,8 @@ LqrOutput lqr_update(LqrController *controller, const LqrSensorData *sensor)
     float pitch;
     float wheel_pos;
     float wheel_vel;
-    float force;
-    float torque;
+    float total_torque;
+    float single_torque;
 
     memset(&output, 0, sizeof(output));
     if (controller == NULL || sensor == NULL || !controller->initialized ||
@@ -102,18 +102,20 @@ LqrOutput lqr_update(LqrController *controller, const LqrSensorData *sensor)
     wheel_vel = 0.5f * cfg->wheel_radius_m *
                 (cfg->left_motor_direction * sensor->left_velocity_rad_s +
                  cfg->right_motor_direction * sensor->right_velocity_rad_s);
-    force = -(cfg->k_theta * (pitch - controller->pitch_target_rad) +
-              cfg->k_theta_rate * sensor->pitch_rate_rad_s +
-              cfg->k_position * (wheel_pos - controller->position_target_m) +
-              cfg->k_velocity * (wheel_vel - controller->velocity_target_m_s));
-    torque = clampf(0.5f * force * cfg->wheel_radius_m,
-                    cfg->torque_limit_nm);
+    total_torque = -(cfg->k_theta *
+                         (pitch - controller->pitch_target_rad) +
+                     cfg->k_theta_rate * sensor->pitch_rate_rad_s +
+                     cfg->k_position *
+                         (wheel_pos - controller->position_target_m) +
+                     cfg->k_velocity *
+                         (wheel_vel - controller->velocity_target_m_s));
+    single_torque = clampf(0.5f * total_torque, cfg->torque_limit_nm);
 
-    output.left_torque_nm = cfg->left_motor_direction * torque;
-    output.right_torque_nm = cfg->right_motor_direction * torque;
+    output.left_torque_nm = cfg->left_motor_direction * single_torque;
+    output.right_torque_nm = cfg->right_motor_direction * single_torque;
     output.wheel_position_m = wheel_pos;
     output.wheel_velocity_m_s = wheel_vel;
-    output.force_command_n = force;
+    output.total_torque_command_nm = 2.0f * single_torque;
     output.enabled = 1U;
     return output;
 }

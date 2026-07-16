@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 typedef struct {
+    /* Discrete LQR gain for total wheel torque, tau_left + tau_right. */
     float k_theta;
     float k_theta_rate;
     float k_position;
@@ -31,7 +32,7 @@ typedef struct {
     float right_torque_nm;
     float wheel_position_m;
     float wheel_velocity_m_s;
-    float force_command_n;
+    float total_torque_command_nm;
     uint8_t enabled;
     uint8_t fault;
 } LqrOutput;

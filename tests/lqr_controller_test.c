@@ -7,10 +7,10 @@
 static LqrConfig test_config(void)
 {
     LqrConfig config = {
-        .k_theta = -100.0f,
-        .k_theta_rate = -10.0f,
-        .k_position = -1.0f,
-        .k_velocity = -2.0f,
+        .k_theta = -4.0f,
+        .k_theta_rate = -0.4f,
+        .k_position = -0.05f,
+        .k_velocity = -0.2f,
         .wheel_radius_m = 0.05f,
         .torque_limit_nm = 0.10f,
         .fall_angle_rad = 0.30f,
@@ -45,11 +45,18 @@ int main(void)
     assert(fabsf(output.wheel_position_m) < 1.0e-6f);
     assert(fabsf(output.left_torque_nm) < 1.0e-6f);
 
-    sensor.pitch_rad = 0.10f;
+    sensor.pitch_rad = 0.04f;
     output = lqr_update(&controller, &sensor);
     assert(output.left_torque_nm > 0.0f);
     assert(output.right_torque_nm < 0.0f);
+    assert(fabsf(output.left_torque_nm - 0.08f) < 1.0e-6f);
+    assert(fabsf(output.total_torque_command_nm - 0.16f) < 1.0e-6f);
+
+    sensor.pitch_rad = 0.10f;
+    output = lqr_update(&controller, &sensor);
     assert(fabsf(output.left_torque_nm - config.torque_limit_nm) < 1.0e-6f);
+    assert(fabsf(output.total_torque_command_nm -
+                 2.0f * config.torque_limit_nm) < 1.0e-6f);
 
     sensor.pitch_rad = 0.31f;
     output = lqr_update(&controller, &sensor);

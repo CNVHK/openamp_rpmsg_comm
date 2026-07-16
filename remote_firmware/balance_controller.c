@@ -130,10 +130,11 @@ static int read_lqr_sensor(uint64_t now, LqrSensorData *sensor,
 int balance_control_init(void)
 {
     const LqrConfig config = {
-        .k_theta = -152.765302998f,
-        .k_theta_rate = -13.260563186f,
-        .k_position = -1.414213562f,
-        .k_velocity = -5.829463511f,
+        /* 100 Hz discrete LQR; input is tau_left + tau_right in N*m. */
+        .k_theta = -3.144999938f,
+        .k_theta_rate = -0.294300374f,
+        .k_position = -0.037757324f,
+        .k_velocity = -0.159143067f,
         .wheel_radius_m = 0.03225f,
         .torque_limit_nm = 0.22f,
         .fall_angle_rad = 15.0f * BALANCE_PI / 180.0f,
