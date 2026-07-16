@@ -9,7 +9,8 @@
 #include <sys/select.h>
 #include <unistd.h>
 
-#define RPMSG_CLIENT_VERSION "0.14.0-lqr-diagnostics"
+#define RPMSG_CLIENT_VERSION "0.15.0-lqr-runtime-config"
+#define RAD_PER_DEG 0.017453292519943295f
 
 static int wait_readable(int fd, int timeout_ms)
 {
@@ -35,6 +36,12 @@ static void put_be_u16(uint8_t *p, uint16_t value)
 {
     p[0] = (uint8_t)(value >> 8);
     p[1] = (uint8_t)(value & 0xff);
+}
+
+static int32_t scaled_i32(float value, float scale)
+{
+    float scaled = value * scale;
+    return (int32_t)(scaled >= 0.0f ? scaled + 0.5f : scaled - 0.5f);
 }
 
 static uint32_t read_be_u32(const uint8_t *p)
@@ -120,6 +127,10 @@ static void usage(const char *prog)
     printf("  %s <rpmsg_dev> balance-enable\n", prog);
     printf("  %s <rpmsg_dev> balance-disable\n", prog);
     printf("  %s <rpmsg_dev> balance-status\n", prog);
+    printf("  %s <rpmsg_dev> balance-trim <upright_pitch_deg>\n", prog);
+    printf("  %s <rpmsg_dev> balance-gains <k_theta> <k_theta_rate> <k_position> <k_velocity>\n", prog);
+    printf("  %s <rpmsg_dev> balance-config\n", prog);
+    printf("  %s <rpmsg_dev> balance-reset-config\n", prog);
     printf("  %s <rpmsg_dev> pvt <motor_id> <pos_x100_deg> <speed_rpm> <torque_percent>\n", prog);
     printf("  %s <rpmsg_dev> stop [motor_id]\n", prog);
     printf("\nExamples:\n");
@@ -135,6 +146,8 @@ static void usage(const char *prog)
     printf("  %s /dev/rpmsg0 balance-enable\n", prog);
     printf("  watch -n 0.1 '%s /dev/rpmsg0 balance-status'\n", prog);
     printf("  %s /dev/rpmsg0 balance-disable\n", prog);
+    printf("  %s /dev/rpmsg0 balance-trim 1.0\n", prog);
+    printf("  %s /dev/rpmsg0 balance-config\n", prog);
     printf("  %s /dev/rpmsg0 enable 1\n", prog);
     printf("  %s /dev/rpmsg0 pvt 1 1000 100 20\n", prog);
     printf("  %s /dev/rpmsg0 stop 1\n", prog);
@@ -308,6 +321,54 @@ static int build_command(int argc, char **argv, uint8_t *type, uint8_t *payload,
         return 0;
     }
 
+    if (strcmp(cmd, "balance-trim") == 0) {
+        char *end = NULL;
+        float trim_deg;
+
+        if (argc < 4) return -1;
+        trim_deg = strtof(argv[3], &end);
+        if (end == argv[3] || *end != '\0' || !isfinite(trim_deg) ||
+            trim_deg < -5.0f || trim_deg > 5.0f) {
+            return -1;
+        }
+        *type = CMD_BALANCE_SET_TRIM;
+        put_be_i32(payload, scaled_i32(trim_deg * RAD_PER_DEG, 1000000.0f));
+        *payload_len = 4U;
+        return 0;
+    }
+
+    if (strcmp(cmd, "balance-gains") == 0) {
+        float gains[4];
+        static const float minimum[4] = {-10.0f, -5.0f, -2.0f, -2.0f};
+        static const float maximum[4] = {-0.1f, 0.0f, 0.0f, 0.0f};
+
+        if (argc < 7) return -1;
+        for (int i = 0; i < 4; ++i) {
+            char *end = NULL;
+            gains[i] = strtof(argv[3 + i], &end);
+            if (end == argv[3 + i] || *end != '\0' || !isfinite(gains[i]) ||
+                gains[i] < minimum[i] || gains[i] > maximum[i]) {
+                return -1;
+            }
+            put_be_i32(&payload[i * 4], scaled_i32(gains[i], 1000000.0f));
+        }
+        *type = CMD_BALANCE_SET_GAINS;
+        *payload_len = 16U;
+        return 0;
+    }
+
+    if (strcmp(cmd, "balance-config") == 0) {
+        *type = CMD_BALANCE_CONFIG;
+        *payload_len = 0U;
+        return 0;
+    }
+
+    if (strcmp(cmd, "balance-reset-config") == 0) {
+        *type = CMD_BALANCE_RESET_CONFIG;
+        *payload_len = 0U;
+        return 0;
+    }
+
     if (strcmp(cmd, "pvt") == 0) {
         if (argc < 7) return -1;
         *type = CMD_CAN_PVT;
@@ -398,6 +459,37 @@ int main(int argc, char **argv)
     }
 
     printf("ack type=%u seq=%u payload_len=%u\n", ack.type, ack.seq, ack.length);
+    if (type >= CMD_BALANCE_SET_TRIM && type <= CMD_BALANCE_RESET_CONFIG) {
+        static const char *const status_names[] = {
+            "ok", "invalid", "busy"
+        };
+        uint8_t status;
+        const char *status_name;
+
+        if (ack.length < 28U || ack.payload[0] != 1U) {
+            printf("invalid balance config reply\n");
+            close(fd);
+            return 3;
+        }
+        status = ack.payload[1];
+        status_name = status < 3U ? status_names[status] : "unknown";
+        printf("balance config: status=%s(%u) state=%u\n",
+               status_name, status, ack.payload[2]);
+        printf("balance trim: %.6f deg (%.6f rad)\n",
+               (double)read_be_i32(&ack.payload[4]) / 1000000.0 /
+                   RAD_PER_DEG,
+               (double)read_be_i32(&ack.payload[4]) / 1000000.0);
+        printf("balance gains: K1=%.6f K2=%.6f K3=%.6f K4=%.6f\n",
+               (double)read_be_i32(&ack.payload[8]) / 1000000.0,
+               (double)read_be_i32(&ack.payload[12]) / 1000000.0,
+               (double)read_be_i32(&ack.payload[16]) / 1000000.0,
+               (double)read_be_i32(&ack.payload[20]) / 1000000.0);
+        printf("posture priority angle: %.6f deg\n",
+               (double)read_be_i32(&ack.payload[24]) / 1000000.0 /
+                   RAD_PER_DEG);
+        close(fd);
+        return status == 0U ? 0 : 4;
+    }
     if (ack.length >= 4) {
         printf("remote state: heartbeat_ok=%u last_can_ret=%d can_rx=%u feedback=%u\n",
                ack.payload[2], (int8_t)ack.payload[3],

@@ -37,7 +37,9 @@ int lqr_init(LqrController *controller, const LqrConfig *config)
     if (controller == NULL || config == NULL ||
         !(config->wheel_radius_m > 0.0f) ||
         !(config->torque_limit_nm > 0.0f) ||
-        !(config->fall_angle_rad > 0.0f)) {
+        !(config->fall_angle_rad > 0.0f) ||
+        !(config->posture_priority_angle_rad > 0.0f) ||
+        config->posture_priority_angle_rad >= config->fall_angle_rad) {
         return -1;
     }
 
@@ -77,6 +79,8 @@ LqrOutput lqr_update(LqrController *controller, const LqrSensorData *sensor)
     float pitch;
     float wheel_pos;
     float wheel_vel;
+    float posture_torque;
+    float travel_torque;
     float total_torque;
     float single_torque;
 
@@ -102,13 +106,21 @@ LqrOutput lqr_update(LqrController *controller, const LqrSensorData *sensor)
     wheel_vel = 0.5f * cfg->wheel_radius_m *
                 (cfg->left_motor_direction * sensor->left_velocity_rad_s +
                  cfg->right_motor_direction * sensor->right_velocity_rad_s);
-    total_torque = -(cfg->k_theta *
-                         (pitch - controller->pitch_target_rad) +
-                     cfg->k_theta_rate * sensor->pitch_rate_rad_s +
-                     cfg->k_position *
-                         (wheel_pos - controller->position_target_m) +
-                     cfg->k_velocity *
-                         (wheel_vel - controller->velocity_target_m_s));
+    posture_torque = -(cfg->k_theta *
+                           (pitch - controller->pitch_target_rad) +
+                       cfg->k_theta_rate * sensor->pitch_rate_rad_s);
+    travel_torque = -(cfg->k_position *
+                          (wheel_pos - controller->position_target_m) +
+                      cfg->k_velocity *
+                          (wheel_vel - controller->velocity_target_m_s));
+
+    /* Preserve all available actuator authority for catching a fall. */
+    if (fabsf(pitch - controller->pitch_target_rad) >=
+            cfg->posture_priority_angle_rad &&
+        posture_torque * travel_torque < 0.0f) {
+        travel_torque = 0.0f;
+    }
+    total_torque = posture_torque + travel_torque;
     single_torque = clampf(0.5f * total_torque, cfg->torque_limit_nm);
 
     output.left_torque_nm = cfg->left_motor_direction * single_torque;

@@ -23,6 +23,8 @@
 #define BALANCE_MAX_WHEEL_SPEED_M_S 1.0f
 #define BALANCE_PI 3.14159265358979323846f
 #define BALANCE_IMU_MOUNT_PITCH_RAD 0.0f
+#define BALANCE_POSTURE_PRIORITY_ANGLE_RAD (3.0f * BALANCE_PI / 180.0f)
+#define BALANCE_MAX_PITCH_TRIM_RAD (5.0f * BALANCE_PI / 180.0f)
 
 static LqrController g_lqr;
 static BalanceTelemetry g_telemetry;
@@ -30,6 +32,27 @@ static uint64_t g_timer_frequency;
 static uint64_t g_period_ticks;
 static uint64_t g_next_tick;
 static uint64_t g_arm_tick;
+
+static const LqrConfig g_default_lqr_config = {
+    /* 100 Hz discrete LQR; input is tau_left + tau_right in N*m. */
+    .k_theta = -3.759673794f,
+    .k_theta_rate = -0.486784559f,
+    .k_position = -0.062456846f,
+    .k_velocity = -0.247058408f,
+    .wheel_radius_m = 0.03225f,
+    .torque_limit_nm = 0.22f,
+    .fall_angle_rad = 15.0f * BALANCE_PI / 180.0f,
+    .pitch_offset_rad = BALANCE_IMU_MOUNT_PITCH_RAD,
+    .posture_priority_angle_rad = BALANCE_POSTURE_PRIORITY_ANGLE_RAD,
+    .left_motor_direction = 1.0f,
+    .right_motor_direction = -1.0f,
+};
+
+static int config_change_allowed(void)
+{
+    return g_telemetry.state != BALANCE_STATE_ACTIVE &&
+           g_telemetry.state != BALANCE_STATE_ARMING;
+}
 static uint8_t g_initialized;
 
 static uint64_t ms_to_ticks(uint32_t milliseconds)
@@ -129,25 +152,12 @@ static int read_lqr_sensor(uint64_t now, LqrSensorData *sensor,
 
 int balance_control_init(void)
 {
-    const LqrConfig config = {
-        /* 100 Hz discrete LQR; input is tau_left + tau_right in N*m. */
-        .k_theta = -3.581464037f,
-        .k_theta_rate = -0.471367743f,
-        .k_position = -0.022129540f,
-        .k_velocity = -0.126453367f,
-        .wheel_radius_m = 0.03225f,
-        .torque_limit_nm = 0.22f,
-        .fall_angle_rad = 15.0f * BALANCE_PI / 180.0f,
-        .pitch_offset_rad = BALANCE_IMU_MOUNT_PITCH_RAD,
-        .left_motor_direction = 1.0f,
-        .right_motor_direction = -1.0f,
-    };
-
     memset(&g_telemetry, 0, sizeof(g_telemetry));
     g_telemetry.state = BALANCE_STATE_DISABLED;
     g_telemetry.control_hz = BALANCE_CONTROL_HZ;
     g_timer_frequency = GenericTimerFrequecy();
-    if (g_timer_frequency == 0U || lqr_init(&g_lqr, &config) != 0) {
+    if (g_timer_frequency == 0U ||
+        lqr_init(&g_lqr, &g_default_lqr_config) != 0) {
         g_telemetry.fault = BALANCE_FAULT_CONFIG;
         g_telemetry.state = BALANCE_STATE_FAULT;
         return -1;
@@ -309,7 +319,10 @@ void balance_control_poll(void)
         enter_fault(BALANCE_FAULT_FALL);
         return;
     }
-    if (fabsf(output.wheel_velocity_m_s) > BALANCE_MAX_WHEEL_SPEED_M_S) {
+    if (fabsf(sensor.left_velocity_rad_s * g_lqr.config.wheel_radius_m) >
+            BALANCE_MAX_WHEEL_SPEED_M_S ||
+        fabsf(sensor.right_velocity_rad_s * g_lqr.config.wheel_radius_m) >
+            BALANCE_MAX_WHEEL_SPEED_M_S) {
         enter_fault(BALANCE_FAULT_SPEED);
         return;
     }
@@ -331,4 +344,61 @@ void balance_control_poll(void)
 const BalanceTelemetry *balance_control_get_telemetry(void)
 {
     return &g_telemetry;
+}
+
+void balance_control_get_runtime_config(BalanceRuntimeConfig *config)
+{
+    if (config == NULL) {
+        return;
+    }
+    config->pitch_trim_rad = g_lqr.config.pitch_offset_rad;
+    config->k_theta = g_lqr.config.k_theta;
+    config->k_theta_rate = g_lqr.config.k_theta_rate;
+    config->k_position = g_lqr.config.k_position;
+    config->k_velocity = g_lqr.config.k_velocity;
+    config->posture_priority_angle_rad =
+        g_lqr.config.posture_priority_angle_rad;
+}
+
+int balance_control_set_pitch_trim(float pitch_trim_rad)
+{
+    if (!config_change_allowed()) {
+        return BALANCE_CONFIG_BUSY;
+    }
+    if (!isfinite(pitch_trim_rad) ||
+        fabsf(pitch_trim_rad) > BALANCE_MAX_PITCH_TRIM_RAD) {
+        return BALANCE_CONFIG_INVALID;
+    }
+    g_lqr.config.pitch_offset_rad = pitch_trim_rad;
+    return BALANCE_CONFIG_OK;
+}
+
+int balance_control_set_gains(float k_theta, float k_theta_rate,
+                              float k_position, float k_velocity)
+{
+    if (!config_change_allowed()) {
+        return BALANCE_CONFIG_BUSY;
+    }
+    if (!isfinite(k_theta) || !isfinite(k_theta_rate) ||
+        !isfinite(k_position) || !isfinite(k_velocity) ||
+        k_theta < -10.0f || k_theta > -0.1f ||
+        k_theta_rate < -5.0f || k_theta_rate > 0.0f ||
+        k_position < -2.0f || k_position > 0.0f ||
+        k_velocity < -2.0f || k_velocity > 0.0f) {
+        return BALANCE_CONFIG_INVALID;
+    }
+    g_lqr.config.k_theta = k_theta;
+    g_lqr.config.k_theta_rate = k_theta_rate;
+    g_lqr.config.k_position = k_position;
+    g_lqr.config.k_velocity = k_velocity;
+    return BALANCE_CONFIG_OK;
+}
+
+int balance_control_reset_runtime_config(void)
+{
+    if (!config_change_allowed()) {
+        return BALANCE_CONFIG_BUSY;
+    }
+    g_lqr.config = g_default_lqr_config;
+    return BALANCE_CONFIG_OK;
 }

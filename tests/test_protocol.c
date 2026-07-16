@@ -28,10 +28,25 @@ static void test_bad_checksum(void)
     assert(!rpmsg_decode(buffer, size, &frame));
 }
 
+static void test_balance_gain_frame(void)
+{
+    uint8_t payload[16] = {0};
+    uint8_t buffer[32];
+    RpmsgFrame frame;
+    size_t size = rpmsg_encode(CMD_BALANCE_SET_GAINS, 3, payload,
+                               sizeof(payload), buffer, sizeof(buffer));
+
+    assert(size == 21);
+    assert(rpmsg_decode(buffer, size, &frame));
+    assert(frame.type == CMD_BALANCE_SET_GAINS);
+    assert(frame.length == sizeof(payload));
+}
+
 int main(void)
 {
     test_encode_decode();
     test_bad_checksum();
+    test_balance_gain_frame();
     printf("rpmsg protocol tests passed\n");
     return 0;
 }

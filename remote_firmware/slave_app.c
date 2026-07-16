@@ -332,6 +332,29 @@ static size_t build_ack(uint8_t seq, uint8_t *out, size_t out_size)
     return rpmsg_encode(CMD_HEARTBEAT, seq, payload, sizeof(payload), out, out_size);
 }
 
+static size_t build_balance_config_ack(uint8_t type, uint8_t seq,
+                                       uint8_t status, uint8_t *out,
+                                       size_t out_size)
+{
+    const BalanceTelemetry *telemetry = balance_control_get_telemetry();
+    BalanceRuntimeConfig config;
+    uint8_t payload[28];
+
+    memset(payload, 0, sizeof(payload));
+    balance_control_get_runtime_config(&config);
+    payload[0] = 1U;
+    payload[1] = status;
+    payload[2] = telemetry->state;
+    write_be_i32(&payload[4], float_to_i32(config.pitch_trim_rad, 1000000.0f));
+    write_be_i32(&payload[8], float_to_i32(config.k_theta, 1000000.0f));
+    write_be_i32(&payload[12], float_to_i32(config.k_theta_rate, 1000000.0f));
+    write_be_i32(&payload[16], float_to_i32(config.k_position, 1000000.0f));
+    write_be_i32(&payload[20], float_to_i32(config.k_velocity, 1000000.0f));
+    write_be_i32(&payload[24],
+                 float_to_i32(config.posture_priority_angle_rad, 1000000.0f));
+    return rpmsg_encode(type, seq, payload, sizeof(payload), out, out_size);
+}
+
 static void update_torque_test_peak(uint8_t motor_id)
 {
     MotorFeedback feedback;
@@ -540,6 +563,34 @@ size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply,
         return build_ack(frame.seq, reply, reply_size);
     case CMD_BALANCE_STATUS:
         return build_ack(frame.seq, reply, reply_size);
+    case CMD_BALANCE_SET_TRIM: {
+        int status = BALANCE_CONFIG_INVALID;
+        if (frame.length >= 4U) {
+            status = balance_control_set_pitch_trim(
+                (float)read_be_i32(frame.payload) / 1000000.0f);
+        }
+        return build_balance_config_ack(frame.type, frame.seq, (uint8_t)status,
+                                        reply, reply_size);
+    }
+    case CMD_BALANCE_SET_GAINS: {
+        int status = BALANCE_CONFIG_INVALID;
+        if (frame.length >= 16U) {
+            status = balance_control_set_gains(
+                (float)read_be_i32(&frame.payload[0]) / 1000000.0f,
+                (float)read_be_i32(&frame.payload[4]) / 1000000.0f,
+                (float)read_be_i32(&frame.payload[8]) / 1000000.0f,
+                (float)read_be_i32(&frame.payload[12]) / 1000000.0f);
+        }
+        return build_balance_config_ack(frame.type, frame.seq, (uint8_t)status,
+                                        reply, reply_size);
+    }
+    case CMD_BALANCE_CONFIG:
+        return build_balance_config_ack(frame.type, frame.seq,
+                                        BALANCE_CONFIG_OK, reply, reply_size);
+    case CMD_BALANCE_RESET_CONFIG:
+        return build_balance_config_ack(
+            frame.type, frame.seq,
+            (uint8_t)balance_control_reset_runtime_config(), reply, reply_size);
     case CMD_CAN_ZERO_POSITION:
         if (frame.length >= 1) {
             handle_can_temporary_origin(frame.payload[0]);

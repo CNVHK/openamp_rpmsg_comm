@@ -37,10 +37,30 @@ typedef struct {
     uint32_t loop_count;
 } BalanceTelemetry;
 
+typedef struct {
+    float pitch_trim_rad;
+    float k_theta;
+    float k_theta_rate;
+    float k_position;
+    float k_velocity;
+    float posture_priority_angle_rad;
+} BalanceRuntimeConfig;
+
+enum {
+    BALANCE_CONFIG_OK = 0,
+    BALANCE_CONFIG_INVALID = 1,
+    BALANCE_CONFIG_BUSY = 2
+};
+
 int balance_control_init(void);
 int balance_control_enable(void);
 void balance_control_disable(void);
 void balance_control_poll(void);
 const BalanceTelemetry *balance_control_get_telemetry(void);
+void balance_control_get_runtime_config(BalanceRuntimeConfig *config);
+int balance_control_set_pitch_trim(float pitch_trim_rad);
+int balance_control_set_gains(float k_theta, float k_theta_rate,
+                              float k_position, float k_velocity);
+int balance_control_reset_runtime_config(void);
 
 #endif

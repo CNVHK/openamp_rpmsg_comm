@@ -15,6 +15,7 @@ static LqrConfig test_config(void)
         .torque_limit_nm = 0.10f,
         .fall_angle_rad = 0.30f,
         .pitch_offset_rad = 0.0f,
+        .posture_priority_angle_rad = 0.05f,
         .left_motor_direction = 1.0f,
         .right_motor_direction = -1.0f,
     };
@@ -72,6 +73,21 @@ int main(void)
     sensor.pitch_rad = NAN;
     output = lqr_update(&controller, &sensor);
     assert(output.fault);
+
+    config = test_config();
+    config.torque_limit_nm = 0.20f;
+    config.posture_priority_angle_rad = 0.05f;
+    assert(lqr_init(&controller, &config) == 0);
+    sensor = upright_sensor();
+    assert(lqr_enable(&controller, &sensor) == 0);
+    sensor.left_position_rad -= 40.0f;
+    sensor.right_position_rad += 40.0f;
+    sensor.pitch_rad = 0.04f;
+    output = lqr_update(&controller, &sensor);
+    assert(fabsf(output.left_torque_nm - 0.03f) < 1.0e-6f);
+    sensor.pitch_rad = 0.06f;
+    output = lqr_update(&controller, &sensor);
+    assert(fabsf(output.left_torque_nm - 0.12f) < 1.0e-6f);
 
     puts("lqr_controller_test: PASS");
     return 0;

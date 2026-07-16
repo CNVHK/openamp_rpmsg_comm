@@ -13,6 +13,7 @@ typedef struct {
     float torque_limit_nm;
     float fall_angle_rad;
     float pitch_offset_rad;
+    float posture_priority_angle_rad;
     float left_motor_direction;
     float right_motor_direction;
 } LqrConfig;

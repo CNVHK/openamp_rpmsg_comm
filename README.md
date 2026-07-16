@@ -87,6 +87,45 @@ sudo ./rpmsg_client /dev/rpmsg0 pvt 1 1000 100 20
 sudo ./rpmsg_client /dev/rpmsg0 stop 1
 ```
 
+## 平衡控制运行时配置
+
+从核固件支持在不重新编译 ELF 的情况下修改俯仰零点和四个 LQR
+增益。配置保存在从核 RAM 中，重启从核后恢复固件默认值。所有修改命令
+只能在 `disabled` 或 `fault` 状态执行，先停止平衡控制：
+
+```bash
+rprun balance-disable
+rprun balance-config
+```
+
+`balance-trim` 设置机器人处于真实机械直立位置时 IMU 应扣除的俯仰角，
+单位为度，允许范围为 `-5` 到 `+5` 度。例如机械直立时状态显示
+`pitch=+1.0 deg`：
+
+```bash
+rprun balance-trim 1.0
+rprun balance-config
+```
+
+设置四个直接总力矩 LQR 增益：
+
+```bash
+rprun balance-gains -3.759674 -0.486785 -0.062457 -0.247058
+rprun balance-config
+```
+
+增益顺序固定为 `K_theta K_theta_rate K_position K_velocity`。固件只接受
+与当前模型符号一致的有限范围参数，但范围检查不能证明参数一定稳定；新参数
+必须架设保护绳并从小倾角开始验证。恢复编译默认配置：
+
+```bash
+rprun balance-reset-config
+```
+
+当俯仰角绝对值达到 `3` 度，并且位置/速度力矩与姿态恢复力矩方向相反时，
+控制器会临时屏蔽相反的行走力矩，优先使用电机力矩恢复姿态。回到阈值以内后
+自动恢复完整四状态 LQR。
+
 `pvt 1 1000 100 20` 含义：
 
 ```text
