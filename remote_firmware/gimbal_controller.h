@@ -86,7 +86,7 @@ typedef struct {
 int gimbal_control_init(void);
 void gimbal_control_poll(void);
 void gimbal_control_shutdown(void);
-int gimbal_control_enable(void);
+int gimbal_control_enable(uint8_t home_torque_percent);
 int gimbal_control_disable(void);
 void gimbal_control_emergency_stop(void);
 int gimbal_control_set_target(int32_t yaw_x100_deg,

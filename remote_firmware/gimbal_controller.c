@@ -11,6 +11,8 @@
 #define GIMBAL_HOME_SPEED_RPM 5U
 #define GIMBAL_DEFAULT_SPEED_RPM 20U
 #define GIMBAL_DEFAULT_TORQUE_PERCENT 10U
+#define GIMBAL_MIN_HOME_TORQUE_PERCENT 5U
+#define GIMBAL_MAX_HOME_TORQUE_PERCENT 50U
 #define GIMBAL_FEEDBACK_TIMEOUT_MS 500U
 #define GIMBAL_HOME_TIMEOUT_MS 12000U
 #define GIMBAL_START_DELAY_MS 20U
@@ -280,7 +282,7 @@ int gimbal_control_init(void)
     return g_timer_frequency == 0U ? -1 : 0;
 }
 
-int gimbal_control_enable(void)
+int gimbal_control_enable(uint8_t home_torque_percent)
 {
     MotorCanFrame frame;
     uint64_t now;
@@ -288,6 +290,10 @@ int gimbal_control_enable(void)
     if (g_telemetry.state != GIMBAL_STATE_DISABLED &&
         g_telemetry.state != GIMBAL_STATE_FAULT) {
         return GIMBAL_STATUS_BUSY;
+    }
+    if (home_torque_percent < GIMBAL_MIN_HOME_TORQUE_PERCENT ||
+        home_torque_percent > GIMBAL_MAX_HOME_TORQUE_PERCENT) {
+        return GIMBAL_STATUS_INVALID;
     }
     if (!limits_are_valid(&g_telemetry.limits)) {
         g_telemetry.fault = GIMBAL_FAULT_LIMIT_CONFIG;
@@ -311,7 +317,7 @@ int gimbal_control_enable(void)
     g_telemetry.yaw_target_x100_deg = 0;
     g_telemetry.pitch_target_x100_deg = 0;
     g_telemetry.command_speed_rpm = GIMBAL_HOME_SPEED_RPM;
-    g_telemetry.command_torque_percent = GIMBAL_DEFAULT_TORQUE_PERCENT;
+    g_telemetry.command_torque_percent = home_torque_percent;
     g_target_timeout_ms = 0U;
     g_motion_deadline_tick = 0U;
     g_home_settle_samples = 0U;

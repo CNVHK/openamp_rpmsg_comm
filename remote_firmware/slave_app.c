@@ -910,7 +910,9 @@ size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply,
         }
         return build_ack(frame.seq, reply, reply_size);
     case CMD_GIMBAL_ENABLE: {
-        int status = gimbal_control_enable();
+        uint8_t home_torque_percent =
+            frame.length >= 1U ? frame.payload[0] : 10U;
+        int status = gimbal_control_enable(home_torque_percent);
         return build_gimbal_ack(frame.type, frame.seq, (uint8_t)status,
                                 reply, reply_size);
     }

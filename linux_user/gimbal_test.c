@@ -369,7 +369,7 @@ static void usage(const char *program)
 {
     printf("Usage:\n");
     printf("  %s <rpmsg_dev> setzero CONFIRM\n", program);
-    printf("  %s <rpmsg_dev> enable|init\n", program);
+    printf("  %s <rpmsg_dev> enable|init [home_torque_pct: 5..50]\n", program);
     printf("  %s <rpmsg_dev> disable|stop\n", program);
     printf("  %s <rpmsg_dev> estop\n", program);
     printf("  %s <rpmsg_dev> set <yaw_deg> <pitch_deg> [speed_rpm] [torque_pct]\n", program);
@@ -419,9 +419,20 @@ int main(int argc, char **argv)
             }
         }
     } else if (strcmp(command, "init") == 0 || strcmp(command, "enable") == 0) {
-        printf("Starting gimbal and slowly homing both axes to zero.\n");
-        ret = send_gimbal_command_with_feedback_retry(
-            fd, CMD_GIMBAL_ENABLE, NULL, 0U, "safe startup");
+        unsigned long home_torque = DEFAULT_TORQUE_PERCENT;
+        uint8_t payload[1];
+        if (argc >= 4 &&
+            (parse_uint(argv[3], 50U, &home_torque) != 0 ||
+             home_torque < 5U)) {
+            fprintf(stderr, "home torque must be 5..50 percent\n");
+        } else {
+            payload[0] = (uint8_t)home_torque;
+            printf("Starting gimbal and slowly homing both axes to zero "
+                   "with %lu%% torque.\n", home_torque);
+            ret = send_gimbal_command_with_feedback_retry(
+                fd, CMD_GIMBAL_ENABLE, payload, sizeof(payload),
+                "safe startup");
+        }
     } else if (strcmp(command, "set") == 0 && argc >= 5) {
         double yaw;
         double pitch;

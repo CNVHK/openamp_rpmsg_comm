@@ -89,7 +89,7 @@ sudo ./build/gimbal_test /dev/rpmsg0 limits <yaw_min> <yaw_max> <pitch_min> <pit
 
 ```bash
 sudo ./build/gimbal_test /dev/rpmsg0 reset-limits CONFIRM
-sudo ./build/gimbal_test /dev/rpmsg0 enable
+sudo ./build/gimbal_test /dev/rpmsg0 enable 10
 ```
 
 预期拒绝启动：
@@ -108,8 +108,13 @@ fault=0x08
 如果 idle 状态没有周期反馈，`enable` 会先在零力矩模式唤醒两轴反馈，工具自动等待后再启动归零；不要连续重复执行 `enable`。
 
 ```bash
-sudo ./build/gimbal_test /dev/rpmsg0 enable
+sudo ./build/gimbal_test /dev/rpmsg0 enable 15
 ```
+
+`enable` 后的可选参数是归位力矩百分比，允许范围为 `5..50`，省略时为
+`10`。负载较重且反馈持续正常但轴无法移动时，应按 `15`、`20`、`25`
+逐级增加。调高前必须托住相机并确认软件限位正确，禁止直接使用 50% 试撞
+机械限位。
 
 另一个终端观察：
 

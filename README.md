@@ -287,11 +287,11 @@ sudo ./build/gimbal_test /dev/rpmsg0 limits -60 60 -25 35 CONFIRM
 如果两轴已经 idle、周期反馈停止，`enable` 会先以零力矩模式自动唤醒反馈；只有收到两轴新鲜角度后才进入位置模式。客户端会等待并自动重试，无需重复手动执行 `enable`。
 
 ```bash
-sudo ./build/gimbal_test /dev/rpmsg0 enable
+sudo ./build/gimbal_test /dev/rpmsg0 enable 15
 sudo ./build/gimbal_test /dev/rpmsg0 status
 ```
 
-`init` 是 `enable` 的兼容别名。只有状态为 `active` 才接受目标。yaw 和 pitch 通过一条原子 RPMsg 命令提交，从核先同时检查两轴边界，再连续发出两条 CAN 帧：
+`enable` 的可选参数是 `5..50` 的归位力矩百分比，省略时为 10%；重载较大时应从 `15` 开始逐级测试，不要直接使用 50% 撞击机械限位。`init` 是 `enable` 的兼容别名。只有状态为 `active` 才接受目标。yaw 和 pitch 通过一条原子 RPMsg 命令提交，从核先同时检查两轴边界，再连续发出两条 CAN 帧：
 
 ```bash
 sudo ./build/gimbal_test /dev/rpmsg0 set 5 0

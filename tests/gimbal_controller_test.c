@@ -75,10 +75,12 @@ static GimbalLimits test_limits(void)
     return limits;
 }
 
-static void start_and_finish_homing(void)
+static void start_and_finish_homing(uint8_t home_torque_percent)
 {
-    assert(gimbal_control_enable() == GIMBAL_STATUS_OK);
+    assert(gimbal_control_enable(home_torque_percent) == GIMBAL_STATUS_OK);
     assert(gimbal_control_get_telemetry()->state == GIMBAL_STATE_STARTING);
+    assert(gimbal_control_get_telemetry()->command_torque_percent ==
+           home_torque_percent);
     advance_ms(20U);
     gimbal_control_poll();
     advance_ms(20U);
@@ -99,9 +101,11 @@ static void test_limits_and_homing(void)
     g_sent_count = 0U;
     set_feedback(0, 0, 0, 0);
     assert(gimbal_control_init() == 0);
-    assert(gimbal_control_enable() == GIMBAL_STATUS_LIMITS_NOT_READY);
+    assert(gimbal_control_enable(10U) == GIMBAL_STATUS_LIMITS_NOT_READY);
     assert(gimbal_control_set_limits(&limits) == GIMBAL_STATUS_OK);
-    start_and_finish_homing();
+    assert(gimbal_control_enable(4U) == GIMBAL_STATUS_INVALID);
+    assert(gimbal_control_enable(51U) == GIMBAL_STATUS_INVALID);
+    start_and_finish_homing(15U);
     assert(g_sent[0].id == 0x603U && g_sent[0].data[2] == 0x60U);
     assert(g_sent[1].id == 0x604U && g_sent[1].data[2] == 0x60U);
     assert(g_sent[4].data[0] == 0x25U && g_sent[5].data[0] == 0x25U);
@@ -195,14 +199,14 @@ static void test_enable_feedback_wakeup(void)
     memset(g_feedback, 0, sizeof(g_feedback));
     assert(gimbal_control_init() == 0);
     assert(gimbal_control_set_limits(&limits) == GIMBAL_STATUS_OK);
-    assert(gimbal_control_enable() == GIMBAL_STATUS_NO_FEEDBACK);
+    assert(gimbal_control_enable(10U) == GIMBAL_STATUS_NO_FEEDBACK);
     assert(g_sent_count == 4U);
 
     advance_ms(20U);
     gimbal_control_poll();
     assert(g_sent_count == 8U);
     set_feedback(0, 0, 0, 0);
-    assert(gimbal_control_enable() == GIMBAL_STATUS_OK);
+    assert(gimbal_control_enable(10U) == GIMBAL_STATUS_OK);
     assert(gimbal_control_get_telemetry()->state == GIMBAL_STATE_STARTING);
     assert(g_sent_count == 12U);
     assert(g_sent[8].data[2] == 0xa0U);
@@ -219,7 +223,7 @@ static void test_position_command_refresh(void)
     assert(gimbal_control_init() == 0);
     set_feedback(0, 0, 0, 0);
     assert(gimbal_control_set_limits(&limits) == GIMBAL_STATUS_OK);
-    start_and_finish_homing();
+    start_and_finish_homing(10U);
     before = g_sent_count;
     advance_ms(50U);
     gimbal_control_poll();
@@ -237,7 +241,7 @@ static void test_controlled_disable(void)
     assert(gimbal_control_init() == 0);
     set_feedback(0, 0, 0, 0);
     assert(gimbal_control_set_limits(&limits) == GIMBAL_STATUS_OK);
-    start_and_finish_homing();
+    start_and_finish_homing(10U);
     assert(gimbal_control_disable() == GIMBAL_STATUS_OK);
     assert(gimbal_control_get_telemetry()->state == GIMBAL_STATE_STOPPING);
     for (unsigned int i = 0; i < 5U; ++i) {
@@ -258,7 +262,7 @@ static void test_motion_timeout(void)
     assert(gimbal_control_init() == 0);
     set_feedback(0, 0, 0, 0);
     assert(gimbal_control_set_limits(&limits) == GIMBAL_STATUS_OK);
-    start_and_finish_homing();
+    start_and_finish_homing(10U);
     assert(gimbal_control_set_target(1500, 0, 20U, 10U, 0U) ==
            GIMBAL_STATUS_OK);
     advance_ms(2500U);
