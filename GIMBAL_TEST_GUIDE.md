@@ -1,0 +1,223 @@
+建议按以下顺序验证，首次测试全程托住摄像头，并保证机器人平衡控制关闭。
+
+**1. 部署**
+
+开发电脑：
+
+```bash
+scpelf
+```
+
+飞腾派：
+
+```bash
+reloadrproc
+
+cd ~/openamp_rpmsg_comm
+git pull origin dev
+make gimbal
+```
+
+确认工具存在：
+
+```bash
+ls -lh build/gimbal_test
+sudo ./build/gimbal_test /dev/rpmsg0 status
+```
+
+预期：
+
+- `state=disabled`
+- `feedback valid=0x03`
+- yaw/pitch 角度、电流、转速能够读取
+- 从核刚重启时 `limits valid=0x00`，这是正常的，因为限位目前只保存在 RAM
+
+**2. 永久零点**
+
+只有尚未设置永久零点，或机械结构发生变化时才执行。
+
+人工把 yaw、pitch 放到真正的机械中位，摄像头朝向期望的正前方：
+
+```bash
+sudo ./build/gimbal_test /dev/rpmsg0 setzero CONFIRM
+sleep 3
+sudo ./build/gimbal_test /dev/rpmsg0 status
+```
+
+这会写电机永久零点并重启驱动器，同时清空软件限位。不要每次启动都执行。
+
+**3. 标定安全限位**
+
+保持云台 `disabled`。手动移动对应轴，边界必须比真实碰撞位置提前留出余量，建议至少预留 5～10°。
+
+依次移动并记录：
+
+```bash
+sudo ./build/gimbal_test /dev/rpmsg0 limit yaw min CONFIRM
+sudo ./build/gimbal_test /dev/rpmsg0 limit yaw max CONFIRM
+sudo ./build/gimbal_test /dev/rpmsg0 limit pitch min CONFIRM
+sudo ./build/gimbal_test /dev/rpmsg0 limit pitch max CONFIRM
+
+sudo ./build/gimbal_test /dev/rpmsg0 status
+```
+
+必须看到：
+
+```text
+limits: valid=0x0f
+```
+
+同时确认：
+
+- yaw 最小值 < 0，最大值 > 0
+- pitch 最小值 < 0，最大值 > 0
+- 数值确实对应安全范围
+
+记下四个角度。以后从核重启后可直接恢复限位，例如：
+
+```bash
+sudo ./build/gimbal_test /dev/rpmsg0 limits <yaw_min> <yaw_max> <pitch_min> <pitch_max> CONFIRM
+```
+
+不要直接照抄 README 中的示例角度。
+
+**4. 验证未标定保护**
+
+这项可在首次标定前做，也可先清除再恢复：
+
+```bash
+sudo ./build/gimbal_test /dev/rpmsg0 reset-limits CONFIRM
+sudo ./build/gimbal_test /dev/rpmsg0 enable
+```
+
+预期拒绝启动：
+
+```text
+status=limits-not-ready
+fault=0x08
+```
+
+然后用记录的四个角度恢复限位。
+
+**5. 验证启动归零**
+
+托住相机，准备随时执行 `estop`：
+
+```bash
+sudo ./build/gimbal_test /dev/rpmsg0 enable
+```
+
+另一个终端观察：
+
+```bash
+for i in $(seq 1 60); do
+    sudo ./build/gimbal_test /dev/rpmsg0 status
+    sleep 0.2
+done
+```
+
+预期状态变化：
+
+```text
+starting -> homing -> active
+```
+
+归零应使用约 `5 rpm` 缓慢运动，并在12秒内进入 `active`。若方向错误、接近碰撞或异常发力，立即：
+
+```bash
+sudo ./build/gimbal_test /dev/rpmsg0 estop
+```
+
+**6. 小角度动作测试**
+
+先使用低速、小角度和10%力矩：
+
+```bash
+sudo ./build/gimbal_test /dev/rpmsg0 set 2 0 5 10
+sudo ./build/gimbal_test /dev/rpmsg0 set -2 0 5 10
+sudo ./build/gimbal_test /dev/rpmsg0 set 0 2 5 10
+sudo ./build/gimbal_test /dev/rpmsg0 set 0 -2 5 10
+sudo ./build/gimbal_test /dev/rpmsg0 center
+```
+
+确认：
+
+- yaw/pitch 方向正确
+- 两轴不会互相串动
+- `target` 与 `feedback` 最终接近
+- 状态始终为 `active`
+- 没有异常电流、线缆拉扯或机械干涉
+
+随后测试组合动作：
+
+```bash
+sudo ./build/gimbal_test /dev/rpmsg0 set 3 3 5 10
+sudo ./build/gimbal_test /dev/rpmsg0 set -3 -3 5 10
+sudo ./build/gimbal_test /dev/rpmsg0 center
+```
+
+**7. 验证目标越界拒绝**
+
+假设实测 yaw 最大限位是 `50°`，发送一个超过边界的目标：
+
+```bash
+sudo ./build/gimbal_test /dev/rpmsg0 set 51 0 5 10
+```
+
+预期：
+
+- 返回 `status=invalid`
+- 云台不应执行这个目标
+- 当前状态不应失控
+- 原目标保持不变
+
+不要通过推动运行中的云台越过真实边界来测试 `0x10`，这会增加损坏风险。
+
+**8. 验证受控关闭**
+
+```bash
+sudo ./build/gimbal_test /dev/rpmsg0 disable
+sleep 1
+sudo ./build/gimbal_test /dev/rpmsg0 status
+```
+
+预期：
+
+```text
+active -> stopping -> disabled
+```
+
+关闭过程约0.5秒，先保持当前位置并逐步降低力矩。摄像头仍需托住，因为完全失能后是否下坠取决于重心和机械阻尼。
+
+**9. 验证紧急停止**
+
+再次启用并进入 `active`，执行一个很小的动作，然后立即：
+
+```bash
+sudo ./build/gimbal_test /dev/rpmsg0 set 2 0 5 10
+sudo ./build/gimbal_test /dev/rpmsg0 estop
+sudo ./build/gimbal_test /dev/rpmsg0 status
+```
+
+预期立即进入 `disabled`，没有0.5秒缓降。
+
+故障位含义：
+
+```text
+0x01 yaw反馈丢失
+0x02 pitch反馈丢失
+0x04 CAN发送失败
+0x08 限位未配置或无效
+0x10 实际位置越界
+0x20 归零超时
+0x40 流式命令超时
+0x80 到位超时、疑似卡滞
+```
+
+完成这些验证后，再运行：
+
+```bash
+sudo ./build/gimbal_test /dev/rpmsg0 sweep 3 2
+```
+
+先从 `3°` 开始，不要直接使用大范围连续测试。
