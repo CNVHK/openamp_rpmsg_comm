@@ -16,11 +16,6 @@
 #define GIMBAL_YAW_MOTOR_ID 3U
 #define GIMBAL_PITCH_MOTOR_ID 4U
 
-#define GIMBAL_YAW_MIN_DEG (-180.0)
-#define GIMBAL_YAW_MAX_DEG 180.0
-#define GIMBAL_PITCH_MIN_DEG (-90.0)
-#define GIMBAL_PITCH_MAX_DEG 90.0
-
 #define DEFAULT_SPEED_RPM 20U
 #define DEFAULT_TORQUE_PERCENT 10U
 #define DEFAULT_SWEEP_DEG 10.0
@@ -62,8 +57,8 @@ static int wait_readable(int fd, int timeout_ms)
     return select(fd + 1, &rfds, NULL, NULL, &tv);
 }
 
-static int send_command(int fd, uint8_t type, const uint8_t *payload,
-                        uint8_t payload_len)
+static int send_command_reply(int fd, uint8_t type, const uint8_t *payload,
+                              uint8_t payload_len, RpmsgFrame *response)
 {
     uint8_t tx[128];
     uint8_t rx[128];
@@ -104,7 +99,11 @@ static int send_command(int fd, uint8_t type, const uint8_t *payload,
         return -1;
     }
 
-    if (ack.length >= 18U) {
+    if (response != NULL) {
+        *response = ack;
+    }
+
+    if (ack.type == CMD_HEARTBEAT && ack.length >= 18U) {
         uint16_t frame_id = (uint16_t)(((uint16_t)ack.payload[15] << 8) |
                                        ack.payload[16]);
         printf("ack: can_init=%d send=%d count=%u last_id=0x%03x\n",
@@ -117,9 +116,10 @@ static int send_command(int fd, uint8_t type, const uint8_t *payload,
     return 0;
 }
 
-static int send_init(int fd, uint8_t motor_id)
+static int send_command(int fd, uint8_t type, const uint8_t *payload,
+                        uint8_t payload_len)
 {
-    return send_command(fd, CMD_CAN_INIT_MOTOR, &motor_id, 1);
+    return send_command_reply(fd, type, payload, payload_len, NULL);
 }
 
 static int send_set_origin(int fd, uint8_t motor_id)
@@ -127,9 +127,88 @@ static int send_set_origin(int fd, uint8_t motor_id)
     return send_command(fd, CMD_CAN_SET_ORIGIN, &motor_id, 1);
 }
 
-static int send_stop(int fd, uint8_t motor_id)
+static int32_t read_be_i32(const uint8_t *p)
 {
-    return send_command(fd, CMD_CAN_SAFE_STOP, &motor_id, 1);
+    return ((int32_t)p[0] << 24) | ((int32_t)p[1] << 16) |
+           ((int32_t)p[2] << 8) | (int32_t)p[3];
+}
+
+static uint32_t read_be_u32(const uint8_t *p)
+{
+    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
+           ((uint32_t)p[2] << 8) | (uint32_t)p[3];
+}
+
+static uint16_t read_be_u16(const uint8_t *p)
+{
+    return (uint16_t)(((uint16_t)p[0] << 8) | p[1]);
+}
+
+static const char *gimbal_state_name(uint8_t state)
+{
+    static const char *const names[] = {
+        "disabled", "starting", "homing", "active", "stopping", "fault"
+    };
+    return state < sizeof(names) / sizeof(names[0]) ? names[state] : "unknown";
+}
+
+static const char *gimbal_status_name(uint8_t status)
+{
+    static const char *const names[] = {
+        "ok", "invalid", "busy", "no-feedback", "limits-not-ready",
+        "can-error"
+    };
+    return status < sizeof(names) / sizeof(names[0]) ? names[status] : "unknown";
+}
+
+static int print_gimbal_reply(const RpmsgFrame *reply)
+{
+    const uint8_t *p;
+    uint8_t status;
+
+    if (reply->length < GIMBAL_TELEMETRY_PAYLOAD_SIZE ||
+        reply->payload[0] != GIMBAL_TELEMETRY_VERSION) {
+        fprintf(stderr, "invalid gimbal reply\n");
+        return -1;
+    }
+    p = reply->payload;
+    status = p[1];
+    printf("gimbal: status=%s(%u) state=%s(%u) fault=0x%02x\n",
+           gimbal_status_name(status), status, gimbal_state_name(p[2]), p[2],
+           p[3]);
+    printf("feedback: valid=0x%02x yaw=%.2f deg %.0f rpm %.2f A age=%u ms; "
+           "pitch=%.2f deg %.0f rpm %.2f A age=%u ms\n",
+           p[5], (double)read_be_i32(&p[8]) / 100.0,
+           (double)(int16_t)read_be_u16(&p[16]),
+           (double)(int16_t)read_be_u16(&p[20]) / 100.0,
+           read_be_u32(&p[52]),
+           (double)read_be_i32(&p[12]) / 100.0,
+           (double)(int16_t)read_be_u16(&p[18]),
+           (double)(int16_t)read_be_u16(&p[22]) / 100.0,
+           read_be_u32(&p[56]));
+    printf("target: yaw=%.2f deg pitch=%.2f deg speed=%u rpm torque=%u%% "
+           "timeout_remaining=%u ms\n",
+           (double)read_be_i32(&p[24]) / 100.0,
+           (double)read_be_i32(&p[28]) / 100.0,
+           read_be_u16(&p[48]), p[6], read_be_u32(&p[60]));
+    printf("limits: valid=0x%02x yaw=[%.2f, %.2f] deg "
+           "pitch=[%.2f, %.2f] deg\n",
+           p[4], (double)read_be_i32(&p[32]) / 100.0,
+           (double)read_be_i32(&p[36]) / 100.0,
+           (double)read_be_i32(&p[40]) / 100.0,
+           (double)read_be_i32(&p[44]) / 100.0);
+    return status == 0U ? 0 : -1;
+}
+
+static int send_gimbal_command(int fd, uint8_t type, const uint8_t *payload,
+                               uint8_t payload_len)
+{
+    RpmsgFrame reply;
+    if (send_command_reply(fd, type, payload, payload_len, &reply) != 0 ||
+        reply.type != type) {
+        return -1;
+    }
+    return print_gimbal_reply(&reply);
 }
 
 static int degrees_to_x100(double degrees, int32_t *result)
@@ -142,39 +221,26 @@ static int degrees_to_x100(double degrees, int32_t *result)
     return 0;
 }
 
-static int send_position(int fd, uint8_t motor_id, double degrees,
-                         uint16_t speed_rpm, uint8_t torque_percent)
-{
-    uint8_t payload[8];
-    int32_t position_x100;
-
-    if (degrees_to_x100(degrees, &position_x100) != 0) {
-        return -1;
-    }
-    payload[0] = motor_id;
-    put_be_i32(&payload[1], position_x100);
-    put_be_u16(&payload[5], speed_rpm);
-    payload[7] = torque_percent;
-    return send_command(fd, CMD_CAN_PVT, payload, sizeof(payload));
-}
-
 static int set_gimbal(int fd, double yaw_deg, double pitch_deg,
                       uint16_t speed_rpm, uint8_t torque_percent)
 {
-    if (yaw_deg < GIMBAL_YAW_MIN_DEG || yaw_deg > GIMBAL_YAW_MAX_DEG ||
-        pitch_deg < GIMBAL_PITCH_MIN_DEG || pitch_deg > GIMBAL_PITCH_MAX_DEG) {
-        fprintf(stderr, "angle outside software limits\n");
-        return -1;
-    }
+    uint8_t payload[13];
+    int32_t yaw_x100;
+    int32_t pitch_x100;
 
     printf("set yaw(id=3)=%.2f deg pitch(id=4)=%.2f deg speed=%u torque=%u%%\n",
            yaw_deg, pitch_deg, speed_rpm, torque_percent);
-    if (send_position(fd, GIMBAL_YAW_MOTOR_ID, yaw_deg,
-                      speed_rpm, torque_percent) != 0) {
+    if (degrees_to_x100(yaw_deg, &yaw_x100) != 0 ||
+        degrees_to_x100(pitch_deg, &pitch_x100) != 0) {
         return -1;
     }
-    return send_position(fd, GIMBAL_PITCH_MOTOR_ID, pitch_deg,
-                         speed_rpm, torque_percent);
+    put_be_i32(&payload[0], yaw_x100);
+    put_be_i32(&payload[4], pitch_x100);
+    put_be_u16(&payload[8], speed_rpm);
+    payload[10] = torque_percent;
+    put_be_u16(&payload[11], 0U);
+    return send_gimbal_command(fd, CMD_GIMBAL_SET_TARGET, payload,
+                               sizeof(payload));
 }
 
 static int sleep_ms(unsigned int delay_ms)
@@ -254,13 +320,17 @@ static void usage(const char *program)
 {
     printf("Usage:\n");
     printf("  %s <rpmsg_dev> setzero CONFIRM\n", program);
-    printf("  %s <rpmsg_dev> init\n", program);
+    printf("  %s <rpmsg_dev> enable|init\n", program);
+    printf("  %s <rpmsg_dev> disable|stop\n", program);
+    printf("  %s <rpmsg_dev> estop\n", program);
     printf("  %s <rpmsg_dev> set <yaw_deg> <pitch_deg> [speed_rpm] [torque_pct]\n", program);
     printf("  %s <rpmsg_dev> center\n", program);
     printf("  %s <rpmsg_dev> sweep [angle_deg] [cycles]\n", program);
     printf("  %s <rpmsg_dev> test [angle_deg]\n", program);
-    printf("  %s <rpmsg_dev> stop\n", program);
     printf("  %s <rpmsg_dev> status\n", program);
+    printf("  %s <rpmsg_dev> limit <yaw|pitch> <min|max> CONFIRM\n", program);
+    printf("  %s <rpmsg_dev> limits <yaw_min> <yaw_max> <pitch_min> <pitch_max> CONFIRM\n", program);
+    printf("  %s <rpmsg_dev> reset-limits CONFIRM\n", program);
 }
 
 int main(int argc, char **argv)
@@ -299,12 +369,9 @@ int main(int argc, char **argv)
                 ret = sleep_ms(2000U);
             }
         }
-    } else if (strcmp(command, "init") == 0) {
-        printf("Using saved motor origins and entering closed-loop position mode.\n");
-        ret = send_init(fd, GIMBAL_YAW_MOTOR_ID);
-        if (ret == 0) {
-            ret = send_init(fd, GIMBAL_PITCH_MOTOR_ID);
-        }
+    } else if (strcmp(command, "init") == 0 || strcmp(command, "enable") == 0) {
+        printf("Starting gimbal and slowly homing both axes to zero.\n");
+        ret = send_gimbal_command(fd, CMD_GIMBAL_ENABLE, NULL, 0U);
     } else if (strcmp(command, "set") == 0 && argc >= 5) {
         double yaw;
         double pitch;
@@ -336,21 +403,57 @@ int main(int argc, char **argv)
         } else {
             ret = run_continuous_test(fd, angle);
         }
-    } else if (strcmp(command, "stop") == 0) {
-        ret = send_stop(fd, GIMBAL_YAW_MOTOR_ID);
-        if (send_stop(fd, GIMBAL_PITCH_MOTOR_ID) != 0) {
-            ret = -1;
-        }
+    } else if (strcmp(command, "stop") == 0 ||
+               strcmp(command, "disable") == 0) {
+        printf("Holding current pose, ramping torque down, then entering idle.\n");
+        ret = send_gimbal_command(fd, CMD_GIMBAL_DISABLE, NULL, 0U);
+    } else if (strcmp(command, "estop") == 0) {
+        ret = send_gimbal_command(fd, CMD_GIMBAL_EMERGENCY_STOP, NULL, 0U);
     } else if (strcmp(command, "status") == 0) {
-        ret = send_command(fd, CMD_HEARTBEAT, NULL, 0);
+        ret = send_gimbal_command(fd, CMD_GIMBAL_STATUS, NULL, 0U);
+    } else if (strcmp(command, "limit") == 0) {
+        uint8_t payload[2];
+        if (argc != 6 || strcmp(argv[5], "CONFIRM") != 0 ||
+            (strcmp(argv[3], "yaw") != 0 && strcmp(argv[3], "pitch") != 0) ||
+            (strcmp(argv[4], "min") != 0 && strcmp(argv[4], "max") != 0)) {
+            fprintf(stderr, "use: limit <yaw|pitch> <min|max> CONFIRM\n");
+        } else {
+            payload[0] = strcmp(argv[3], "pitch") == 0 ? 1U : 0U;
+            payload[1] = strcmp(argv[4], "max") == 0 ? 1U : 0U;
+            ret = send_gimbal_command(fd, CMD_GIMBAL_CALIBRATE_LIMIT,
+                                      payload, sizeof(payload));
+        }
+    } else if (strcmp(command, "limits") == 0) {
+        uint8_t payload[16];
+        double values[4];
+        int32_t scaled[4];
+        int valid = argc == 8 && strcmp(argv[7], "CONFIRM") == 0;
+        for (int i = 0; i < 4 && valid; ++i) {
+            valid = parse_double(argv[3 + i], &values[i]) == 0 &&
+                    degrees_to_x100(values[i], &scaled[i]) == 0;
+        }
+        if (!valid) {
+            fprintf(stderr, "use: limits <yaw_min> <yaw_max> <pitch_min> <pitch_max> CONFIRM\n");
+        } else {
+            for (int i = 0; i < 4; ++i) {
+                put_be_i32(&payload[i * 4], scaled[i]);
+            }
+            ret = send_gimbal_command(fd, CMD_GIMBAL_SET_LIMITS,
+                                      payload, sizeof(payload));
+        }
+    } else if (strcmp(command, "reset-limits") == 0) {
+        if (argc != 4 || strcmp(argv[3], "CONFIRM") != 0) {
+            fprintf(stderr, "use: reset-limits CONFIRM\n");
+        } else {
+            ret = send_gimbal_command(fd, CMD_GIMBAL_RESET_LIMITS, NULL, 0U);
+        }
     } else {
         usage(argv[0]);
     }
 
     if (g_stop_requested) {
-        fprintf(stderr, "stopping yaw and pitch motors\n");
-        (void)send_stop(fd, GIMBAL_YAW_MOTOR_ID);
-        (void)send_stop(fd, GIMBAL_PITCH_MOTOR_ID);
+        fprintf(stderr, "requesting controlled gimbal shutdown\n");
+        (void)send_gimbal_command(fd, CMD_GIMBAL_DISABLE, NULL, 0U);
     }
     close(fd);
     return ret == 0 ? 0 : 1;

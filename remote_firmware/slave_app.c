@@ -12,6 +12,7 @@
 
 #include "rpmsg_protocol.h"
 #include "balance_controller.h"
+#include "gimbal_controller.h"
 #include "motor_can.h"
 #include "phytium_bmi088_port.h"
 #include "phytium_can_port.h"
@@ -144,6 +145,12 @@ static void handle_can_temporary_origin(uint8_t motor_id)
     send_motor_frame(&can_frame);
 }
 
+static int is_gimbal_motor(uint8_t motor_id)
+{
+    return motor_id == GIMBAL_YAW_MOTOR_ID ||
+           motor_id == GIMBAL_PITCH_MOTOR_ID;
+}
+
 static void write_be_i32(uint8_t *p, int32_t value)
 {
     write_be_u32(p, (uint32_t)value);
@@ -192,6 +199,9 @@ static void handle_can_pvt(const uint8_t *payload, uint8_t length)
     uint8_t torque_percent = payload[7];
 
     MotorCanFrame can_frame;
+    if (is_gimbal_motor(motor_id)) {
+        return;
+    }
     motor_build_pvt(motor_id, position_x100_deg, speed_rpm, torque_percent, &can_frame);
     send_motor_frame(&can_frame);
 }
@@ -428,6 +438,39 @@ static size_t build_speed_diag_ack(uint8_t seq, uint8_t *out,
     write_be_u32(&payload[16], g_speed_diag.sample_count);
     return rpmsg_encode(CMD_CAN_SPEED_DIAG, seq, payload, sizeof(payload),
                         out, out_size);
+}
+
+static size_t build_gimbal_ack(uint8_t type, uint8_t seq, uint8_t status,
+                               uint8_t *out, size_t out_size)
+{
+    const GimbalTelemetry *telemetry = gimbal_control_get_telemetry();
+    uint8_t payload[GIMBAL_TELEMETRY_PAYLOAD_SIZE];
+
+    memset(payload, 0, sizeof(payload));
+    payload[0] = GIMBAL_TELEMETRY_VERSION;
+    payload[1] = status;
+    payload[2] = telemetry->state;
+    payload[3] = telemetry->fault;
+    payload[4] = telemetry->limits_valid_mask;
+    payload[5] = telemetry->feedback_valid_mask;
+    payload[6] = telemetry->command_torque_percent;
+    write_be_i32(&payload[8], telemetry->yaw_position_x100_deg);
+    write_be_i32(&payload[12], telemetry->pitch_position_x100_deg);
+    write_be_u16(&payload[16], (uint16_t)telemetry->yaw_speed_rpm);
+    write_be_u16(&payload[18], (uint16_t)telemetry->pitch_speed_rpm);
+    write_be_u16(&payload[20], (uint16_t)telemetry->yaw_current_x100_a);
+    write_be_u16(&payload[22], (uint16_t)telemetry->pitch_current_x100_a);
+    write_be_i32(&payload[24], telemetry->yaw_target_x100_deg);
+    write_be_i32(&payload[28], telemetry->pitch_target_x100_deg);
+    write_be_i32(&payload[32], telemetry->limits.yaw_min_x100_deg);
+    write_be_i32(&payload[36], telemetry->limits.yaw_max_x100_deg);
+    write_be_i32(&payload[40], telemetry->limits.pitch_min_x100_deg);
+    write_be_i32(&payload[44], telemetry->limits.pitch_max_x100_deg);
+    write_be_u16(&payload[48], telemetry->command_speed_rpm);
+    write_be_u32(&payload[52], telemetry->yaw_feedback_age_ms);
+    write_be_u32(&payload[56], telemetry->pitch_feedback_age_ms);
+    write_be_u32(&payload[60], telemetry->command_timeout_remaining_ms);
+    return rpmsg_encode(type, seq, payload, sizeof(payload), out, out_size);
 }
 
 static void update_torque_test_peak(uint8_t motor_id)
@@ -687,16 +730,21 @@ static void handle_can_speed_diag(const uint8_t *payload, uint8_t length)
 
 int slave_app_init(void)
 {
-    return balance_control_init();
+    int balance_ret = balance_control_init();
+    int gimbal_ret = gimbal_control_init();
+
+    return balance_ret != 0 ? balance_ret : gimbal_ret;
 }
 
 void slave_app_poll(void)
 {
     balance_control_poll();
+    gimbal_control_poll();
 }
 
 void slave_app_shutdown(void)
 {
+    gimbal_control_shutdown();
     balance_control_disable();
 }
 
@@ -713,17 +761,17 @@ size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply,
         g_state.heartbeat_ok = 1;
         return build_ack(frame.seq, reply, reply_size);
     case CMD_CAN_ENABLE:
-        if (frame.length >= 1) {
+        if (frame.length >= 1 && !is_gimbal_motor(frame.payload[0])) {
             handle_can_enable(frame.payload[0]);
         }
         return build_ack(frame.seq, reply, reply_size);
     case CMD_CAN_SET_MODE:
-        if (frame.length >= 3) {
+        if (frame.length >= 3 && !is_gimbal_motor(frame.payload[0])) {
             handle_can_set_mode(frame.payload[0], read_be_u16(&frame.payload[1]));
         }
         return build_ack(frame.seq, reply, reply_size);
     case CMD_CAN_INIT_MOTOR:
-        if (frame.length >= 1) {
+        if (frame.length >= 1 && !is_gimbal_motor(frame.payload[0])) {
             handle_can_init_motor(frame.payload[0]);
         }
         return build_ack(frame.seq, reply, reply_size);
@@ -741,6 +789,10 @@ size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply,
         return build_speed_diag_ack(frame.seq, reply, reply_size);
     case CMD_CAN_SET_ORIGIN:
         if (frame.length >= 1) {
+            if (is_gimbal_motor(frame.payload[0])) {
+                gimbal_control_emergency_stop();
+                (void)gimbal_control_reset_limits();
+            }
             handle_can_set_origin(frame.payload[0]);
         }
         return build_ack(frame.seq, reply, reply_size);
@@ -834,7 +886,7 @@ size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply,
                                         reply, reply_size);
     }
     case CMD_CAN_ZERO_POSITION:
-        if (frame.length >= 1) {
+        if (frame.length >= 1 && !is_gimbal_motor(frame.payload[0])) {
             handle_can_temporary_origin(frame.payload[0]);
         }
         return build_ack(frame.seq, reply, reply_size);
@@ -843,12 +895,73 @@ size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply,
         return build_ack(frame.seq, reply, reply_size);
     case CMD_CAN_SAFE_STOP:
         if (frame.length >= 1) {
-            handle_can_safe_stop(frame.payload[0]);
+            if (is_gimbal_motor(frame.payload[0])) {
+                gimbal_control_emergency_stop();
+            } else {
+                handle_can_safe_stop(frame.payload[0]);
+            }
         } else {
             handle_can_safe_stop(1);
             handle_can_safe_stop(2);
         }
         return build_ack(frame.seq, reply, reply_size);
+    case CMD_GIMBAL_ENABLE: {
+        int status = gimbal_control_enable();
+        return build_gimbal_ack(frame.type, frame.seq, (uint8_t)status,
+                                reply, reply_size);
+    }
+    case CMD_GIMBAL_DISABLE: {
+        int status = gimbal_control_disable();
+        return build_gimbal_ack(frame.type, frame.seq, (uint8_t)status,
+                                reply, reply_size);
+    }
+    case CMD_GIMBAL_SET_TARGET: {
+        int status = GIMBAL_STATUS_INVALID;
+        if (frame.length >= 13U) {
+            status = gimbal_control_set_target(
+                read_be_i32(&frame.payload[0]),
+                read_be_i32(&frame.payload[4]),
+                read_be_u16(&frame.payload[8]), frame.payload[10],
+                read_be_u16(&frame.payload[11]));
+        }
+        return build_gimbal_ack(frame.type, frame.seq, (uint8_t)status,
+                                reply, reply_size);
+    }
+    case CMD_GIMBAL_STATUS:
+        return build_gimbal_ack(frame.type, frame.seq, GIMBAL_STATUS_OK,
+                                reply, reply_size);
+    case CMD_GIMBAL_CALIBRATE_LIMIT: {
+        int status = GIMBAL_STATUS_INVALID;
+        if (frame.length >= 2U) {
+            status = gimbal_control_calibrate_limit(frame.payload[0],
+                                                    frame.payload[1]);
+        }
+        return build_gimbal_ack(frame.type, frame.seq, (uint8_t)status,
+                                reply, reply_size);
+    }
+    case CMD_GIMBAL_SET_LIMITS: {
+        GimbalLimits limits;
+        int status = GIMBAL_STATUS_INVALID;
+        if (frame.length >= 16U) {
+            limits.yaw_min_x100_deg = read_be_i32(&frame.payload[0]);
+            limits.yaw_max_x100_deg = read_be_i32(&frame.payload[4]);
+            limits.pitch_min_x100_deg = read_be_i32(&frame.payload[8]);
+            limits.pitch_max_x100_deg = read_be_i32(&frame.payload[12]);
+            limits.valid_mask = GIMBAL_LIMIT_ALL_VALID;
+            status = gimbal_control_set_limits(&limits);
+        }
+        return build_gimbal_ack(frame.type, frame.seq, (uint8_t)status,
+                                reply, reply_size);
+    }
+    case CMD_GIMBAL_RESET_LIMITS: {
+        int status = gimbal_control_reset_limits();
+        return build_gimbal_ack(frame.type, frame.seq, (uint8_t)status,
+                                reply, reply_size);
+    }
+    case CMD_GIMBAL_EMERGENCY_STOP:
+        gimbal_control_emergency_stop();
+        return build_gimbal_ack(frame.type, frame.seq, GIMBAL_STATUS_OK,
+                                reply, reply_size);
     default:
         return 0;
     }

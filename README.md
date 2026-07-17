@@ -210,19 +210,6 @@ sudo ./build/balance_logger --rate 20
 
 从核收到 `CMD_CAN_PVT` 后会打包为 `0x25` PVT CAN 帧，并通过 `phytium_can_send()` 发送。`test` 命令会初始化两台电机，并让两台电机各转动一圈。
 
-## 云台电机测试
-
-`linux_user/gimbal_test.c` 是主核 Linux 侧的云台测试程序，固定使用：
-
-- CAN ID 3：yaw 电机
-- CAN ID 4：pitch 电机
-
-在飞腾派 Linux 上编译：
-
-```bash
-make gimbal
-```
-
 `torque-test` 仅用于排查 ID 1/2 轮电机的力矩模式。力矩范围为 -0.22–0.22 N·m，脉冲时间为 20–2000 ms；命令结束后会自动发送零力矩并进入 idle。长时间测试前必须先用机械方式约束车轮，不能用手接触旋转中的车轮。
 
 读取电机驱动器错误寄存器 `0x000C`：
@@ -232,9 +219,7 @@ sudo ./build/rpmsg_client /dev/rpmsg0 motor-fault 1
 sudo ./build/rpmsg_client /dev/rpmsg0 motor-fault 2
 ```
 
-轮速三方对照诊断只能在平衡控制停用且车轮架空或机械约束时运行。它会短时施加不超过
-`0.10 N*m` 的力矩，同时比较周期反馈 `0x2A`、实时速度寄存器 `0x0006`
-和编码器位置差分得到的速度，结束后自动清零力矩并进入 idle：
+轮速三方对照诊断只能在平衡控制停用且车轮架空或机械约束时运行。它会短时施加不超过 `0.10 N*m` 的力矩，同时比较周期反馈 `0x2A`、实时速度寄存器 `0x0006` 和编码器位置差分得到的速度，结束后自动清零力矩并进入 idle：
 
 ```bash
 rprun balance-disable
@@ -242,58 +227,88 @@ sudo ./build/rpmsg_client /dev/rpmsg0 motor-speed-diag 1 0.05 1000
 sudo ./build/rpmsg_client /dev/rpmsg0 motor-speed-diag 2 -0.05 1000
 ```
 
-实机三方对照确认周期反馈速度、`0x0006` 寄存器速度和位置差分速度误差
-小于约 1.2%，因此平衡控制使用 `1.0` 速度系数。俯仰角速度在进入 LQR
-前经过 10 Hz 一阶低通，默认 `K2=-0.4`。`balance-config` 会显示这两个固定参数。
+实机三方对照确认周期反馈速度、`0x0006` 寄存器速度和位置差分速度误差小于约 1.2%，因此平衡控制使用 `1.0` 速度系数。
 
-首次安装时，先卸载负载或架空云台，并手动把 yaw、pitch 放到机械中位。确认位置无误后执行永久标零：
+## 云台控制和安全标定
+
+`linux_user/gimbal_test.c` 是 Linux 侧云台控制和标定工具，固定使用 CAN ID 3 作为 yaw、ID 4 作为 pitch。编译命令为：
+
+```bash
+make gimbal
+```
+
+### 永久零点
+
+首次安装时先可靠托住云台，将 yaw、pitch 手动放到机械中位。确认摄像头和支架都有足够活动空间后执行：
 
 ```bash
 sudo ./build/gimbal_test /dev/rpmsg0 setzero CONFIRM
 ```
 
-该命令分别向 ID 3 和 ID 4 写入永久原点寄存器 `0x00A6`。驱动器会保存当前位置偏置并重启；通常只需要执行一次。重新安装电机、驱动板或机械结构发生变化时才重新标零。
+该命令向两台驱动器写入永久原点寄存器 `0x00A6`。驱动器会保存当前位置并重启；只有重新安装电机、驱动板或机械结构变化时才需要再次执行。通用客户端的 `zero <id>` 使用临时原点 `0x00A7`，不能替代永久零点。
 
-驱动器重启完成后执行日常初始化。初始化只设置位置梯形轨迹模式并进入闭环，不会修改已经保存的原点：
+### 软件安全范围
+
+永久零点完成后必须标定四个软件边界。边界应留在真正碰撞位置以内，不能把机械止挡或线缆刚好拉紧的位置作为软件边界。
+
+保持从核状态为 `disabled`，手动移动对应轴到安全位置后分别确认：
 
 ```bash
-sudo ./build/gimbal_test /dev/rpmsg0 init
+sudo ./build/gimbal_test /dev/rpmsg0 limit yaw min CONFIRM
+sudo ./build/gimbal_test /dev/rpmsg0 limit yaw max CONFIRM
+sudo ./build/gimbal_test /dev/rpmsg0 limit pitch min CONFIRM
+sudo ./build/gimbal_test /dev/rpmsg0 limit pitch max CONFIRM
+sudo ./build/gimbal_test /dev/rpmsg0 status
 ```
 
-先用低速、小角度测试。`set` 的角度单位是度，后两个可选参数分别是转速 rpm 和力矩百分比：
+只有显示 `limits: valid=0x0f` 才允许启动。最小值必须为负角度、最大值必须为正角度，永久零点必须位于每一对边界之间。
+
+软件边界目前保存在从核 RAM 中，从核重启后会清除。记录好四个实机角度后，可以直接恢复：
+
+```bash
+sudo ./build/gimbal_test /dev/rpmsg0 limits -60 60 -25 35 CONFIRM
+```
+
+上面的数字只是格式示例，必须替换成实机标定结果。清除全部边界使用 `reset-limits CONFIRM`。
+
+### 启动归零和位置控制
+
+边界有效后启动。两台电机进入位置模式，并以 `5 rpm` 缓慢归零；状态依次经过 `starting`、`homing`、`active`：
+
+```bash
+sudo ./build/gimbal_test /dev/rpmsg0 enable
+sudo ./build/gimbal_test /dev/rpmsg0 status
+```
+
+`init` 是 `enable` 的兼容别名。只有状态为 `active` 才接受目标。yaw 和 pitch 通过一条原子 RPMsg 命令提交，从核先同时检查两轴边界，再连续发出两条 CAN 帧：
 
 ```bash
 sudo ./build/gimbal_test /dev/rpmsg0 set 5 0
 sudo ./build/gimbal_test /dev/rpmsg0 set 0 5 20 10
 sudo ./build/gimbal_test /dev/rpmsg0 center
-```
-
-默认扫动幅度为正负 10 度、20 rpm、10% 力矩，只执行一轮：
-
-```bash
-sudo ./build/gimbal_test /dev/rpmsg0 sweep
 sudo ./build/gimbal_test /dev/rpmsg0 sweep 5 2
 ```
 
-持续小角度循环测试默认使用正负 5 度，并一直运行到按下 `Ctrl+C`。也可以指定不超过 10 度的幅度：
+持续循环测试使用 `test [angle_deg]`，按 `Ctrl+C` 会请求受控关闭。测试不会自动启动、标零或恢复边界。
+
+归零超过 12 秒、任一反馈超过 150 ms 未更新、实际位置越过边界 1 度、目标未在按角差和速度计算的期限内到位或 CAN 发送失败时，从核会立即让两台电机进入 idle。故障位为：`0x01` yaw 反馈、`0x02` pitch 反馈、`0x04` CAN、`0x08` 边界配置、`0x10` 实际越界、`0x20` 归零超时、`0x40` 流式命令超时、`0x80` 运动到位超时/疑似卡滞。
+
+### 受控关闭和紧急停止
+
+正常关闭先保持当前实际位置，每 100 ms 降低 2% 力矩，约 0.5 秒后进入 idle。应等待状态变成 `disabled` 再断电：
 
 ```bash
-sudo ./build/gimbal_test /dev/rpmsg0 test
-sudo ./build/gimbal_test /dev/rpmsg0 test 3
-```
-
-`test` 不会初始化或修改原点，运行前必须先执行一次 `init`。
-
-停止 ID 3 和 ID 4，或读取通信状态：
-
-```bash
-sudo ./build/gimbal_test /dev/rpmsg0 stop
+sudo ./build/gimbal_test /dev/rpmsg0 disable
 sudo ./build/gimbal_test /dev/rpmsg0 status
 ```
 
-扫动过程中按 `Ctrl+C` 会向两台电机发送停止命令。程序的软件角度限制当前为 yaw 正负 180 度、pitch 正负 90 度；正式带机构测试前，应按实际机械限位修改 `linux_user/gimbal_test.c` 中的限制值。两个电机命令通过 RPMsg 依次发送，因此该程序适合功能测试，不是严格同步的实时云台控制器。
+`stop` 是 `disable` 的兼容别名。即将碰撞、机构卡死或其他紧急情况使用立即 idle，不经过力矩缓降：
 
-通用客户端的 `zero <id>` 使用 `0x00A7`，只是临时原点，驱动器重启后失效；`setorigin <id>` 使用 `0x00A6`，会永久保存原点并重启驱动器。不要把两者混用。
+```bash
+sudo ./build/gimbal_test /dev/rpmsg0 estop
+```
+
+`status` 会显示目标和实际角度、速度、电流、反馈年龄、软件边界、运行状态和故障。正常缓降只能减少突然失力，无法保证所有重心和摩擦条件下摄像头都不下坠，机械结构仍应配置限位和必要的阻尼或防坠措施。
 
 ## 从核工程必须配置
 

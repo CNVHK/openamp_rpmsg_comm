@@ -141,7 +141,7 @@ phytium-pi-os/output/build/phytium-standalone-openamp-v1.0/example/system/amp/op
 集成方式：
 
 1. 复制 `src/rpmsg_protocol.h` 和 `src/rpmsg_protocol.c` 到从核工程。
-2. 复制 `remote_firmware/slave_app.c` 中的 `slave_handle_frame()` 逻辑。
+2. 复制 `remote_firmware` 下的业务源码和头文件，包括 `slave_app`、平衡控制、云台控制及硬件适配文件。
 3. 在原 OpenAMP rpmsg 回调中调用：
 
 ```c
