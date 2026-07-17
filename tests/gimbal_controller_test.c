@@ -156,6 +156,36 @@ static void test_calibration(void)
     assert(telemetry->limits.pitch_max_x100_deg == 1800);
 }
 
+static void test_calibration_feedback_wakeup(void)
+{
+    g_now = 1000U;
+    g_sent_count = 0U;
+    memset(g_feedback, 0, sizeof(g_feedback));
+    assert(gimbal_control_init() == 0);
+    assert(gimbal_control_calibrate_limit(GIMBAL_AXIS_YAW,
+                                          GIMBAL_LIMIT_MIN) ==
+           GIMBAL_STATUS_NO_FEEDBACK);
+    assert(g_sent_count == 4U);
+    assert(g_sent[0].data[0] == 0x2bU && g_sent[0].data[2] == 0x60U);
+    assert(g_sent[2].data[0] == 0x2bU && g_sent[2].data[2] == 0x20U);
+
+    advance_ms(20U);
+    gimbal_control_poll();
+    assert(g_sent_count == 8U);
+    assert(g_sent[4].data[0] == 0x2bU && g_sent[4].data[2] == 0xa2U);
+
+    set_feedback(-5000, -2500, 0, 0);
+    assert(gimbal_control_calibrate_limit(GIMBAL_AXIS_YAW,
+                                          GIMBAL_LIMIT_MIN) ==
+           GIMBAL_STATUS_OK);
+    assert(gimbal_control_get_telemetry()->limits.yaw_min_x100_deg == -5000);
+
+    advance_ms(30001U);
+    gimbal_control_poll();
+    assert(g_sent[g_sent_count - 2U].data[2] == 0xa0U);
+    assert(g_sent[g_sent_count - 1U].data[2] == 0xa0U);
+}
+
 static void test_controlled_disable(void)
 {
     GimbalLimits limits = test_limits();
@@ -201,6 +231,7 @@ int main(void)
     test_limits_and_homing();
     test_target_and_limit_fault();
     test_calibration();
+    test_calibration_feedback_wakeup();
     test_controlled_disable();
     test_motion_timeout();
     puts("gimbal_controller_test: PASS");

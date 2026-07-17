@@ -21,9 +21,14 @@
 #define DEFAULT_SWEEP_DEG 10.0
 #define DEFAULT_TEST_DEG 5.0
 #define DEFAULT_SWEEP_DELAY_MS 800U
+#define LIMIT_FEEDBACK_RETRY_MS 100U
+#define LIMIT_FEEDBACK_RETRIES 20U
+#define GIMBAL_REPLY_NO_FEEDBACK 3U
 
 static volatile sig_atomic_t g_stop_requested;
 static uint8_t g_seq;
+
+static int sleep_ms(unsigned int delay_ms);
 
 static void request_stop(int signo)
 {
@@ -209,6 +214,42 @@ static int send_gimbal_command(int fd, uint8_t type, const uint8_t *payload,
         return -1;
     }
     return print_gimbal_reply(&reply);
+}
+
+static int calibrate_gimbal_limit(int fd, const uint8_t *payload)
+{
+    RpmsgFrame reply;
+    uint8_t status = 0xffU;
+    int ret;
+
+    for (unsigned int attempt = 0U; attempt <= LIMIT_FEEDBACK_RETRIES;
+         ++attempt) {
+        if (attempt != 0U && sleep_ms(LIMIT_FEEDBACK_RETRY_MS) != 0) {
+            return -1;
+        }
+        if (send_command_reply(fd, CMD_GIMBAL_CALIBRATE_LIMIT, payload, 2U,
+                               &reply) != 0 ||
+            reply.type != CMD_GIMBAL_CALIBRATE_LIMIT ||
+            reply.length < GIMBAL_TELEMETRY_PAYLOAD_SIZE) {
+            return -1;
+        }
+        status = reply.payload[1];
+        if (status != GIMBAL_REPLY_NO_FEEDBACK) {
+            ret = print_gimbal_reply(&reply);
+            return ret;
+        }
+        if (attempt == 0U) {
+            (void)print_gimbal_reply(&reply);
+            printf("Waking both axes in zero-torque calibration mode; "
+                   "support the camera because holding torque is zero...\n");
+        }
+        if (attempt == LIMIT_FEEDBACK_RETRIES) {
+            fprintf(stderr, "motor feedback did not start within %u ms\n",
+                    LIMIT_FEEDBACK_RETRIES * LIMIT_FEEDBACK_RETRY_MS);
+            return -1;
+        }
+    }
+    return -1;
 }
 
 static int degrees_to_x100(double degrees, int32_t *result)
@@ -420,8 +461,7 @@ int main(int argc, char **argv)
         } else {
             payload[0] = strcmp(argv[3], "pitch") == 0 ? 1U : 0U;
             payload[1] = strcmp(argv[4], "max") == 0 ? 1U : 0U;
-            ret = send_gimbal_command(fd, CMD_GIMBAL_CALIBRATE_LIMIT,
-                                      payload, sizeof(payload));
+            ret = calibrate_gimbal_limit(fd, payload);
         }
     } else if (strcmp(command, "limits") == 0) {
         uint8_t payload[16];

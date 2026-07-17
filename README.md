@@ -253,6 +253,11 @@ sudo ./build/gimbal_test /dev/rpmsg0 setzero CONFIRM
 
 保持从核状态为 `disabled`，手动移动对应轴到安全位置后分别确认：
 
+`limit` 第一次发现驱动器处于 idle 且没有新反馈时，会让 yaw、pitch
+进入零力矩标定模式并自动等待实时角度；这个过程只唤醒反馈，不发送位置目标。
+全部四个边界完成、执行 `disable`/`estop` 或 30 秒没有继续标定时，两轴自动
+回到 idle。
+
 ```bash
 sudo ./build/gimbal_test /dev/rpmsg0 limit yaw min CONFIRM
 sudo ./build/gimbal_test /dev/rpmsg0 limit yaw max CONFIRM

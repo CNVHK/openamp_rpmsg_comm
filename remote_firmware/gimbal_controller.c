@@ -24,6 +24,9 @@
 #define GIMBAL_STOP_STEP_MS 100U
 #define GIMBAL_STOP_TORQUE_STEP_PERCENT 2U
 #define GIMBAL_MAX_ABS_LIMIT_X100_DEG 36000
+#define GIMBAL_CALIBRATION_START_DELAY_MS 20U
+#define GIMBAL_CALIBRATION_KEEPALIVE_MS 100U
+#define GIMBAL_CALIBRATION_TIMEOUT_MS 30000U
 
 static GimbalTelemetry g_telemetry;
 static uint64_t g_timer_frequency;
@@ -35,6 +38,10 @@ static uint16_t g_target_timeout_ms;
 static uint8_t g_start_phase;
 static uint8_t g_home_settle_samples;
 static uint8_t g_stop_torque_percent;
+static uint8_t g_calibration_feedback_active;
+static uint8_t g_calibration_phase;
+static uint64_t g_calibration_step_tick;
+static uint64_t g_calibration_activity_tick;
 
 static uint64_t ms_to_ticks(uint32_t milliseconds)
 {
@@ -65,6 +72,56 @@ static int send_idle_both(void)
     motor_build_idle(GIMBAL_PITCH_MOTOR_ID, &frame);
     ret |= send_frame(&frame);
     return ret;
+}
+
+static int send_zero_torque_both(void)
+{
+    MotorCanFrame frame;
+
+    motor_build_torque(GIMBAL_YAW_MOTOR_ID, 0, &frame);
+    if (send_frame(&frame) != 0) {
+        return -1;
+    }
+    motor_build_torque(GIMBAL_PITCH_MOTOR_ID, 0, &frame);
+    return send_frame(&frame);
+}
+
+static int stop_calibration_feedback(void)
+{
+    int ret = 0;
+
+    if (g_calibration_feedback_active) {
+        ret = send_idle_both();
+    }
+    g_calibration_feedback_active = 0U;
+    g_calibration_phase = 0U;
+    return ret;
+}
+
+static int start_calibration_feedback(uint64_t now)
+{
+    MotorCanFrame frame;
+
+    g_calibration_activity_tick = now;
+    if (g_calibration_feedback_active) {
+        return 0;
+    }
+
+    /* Torque mode with a zero command provides feedback without motion. */
+    motor_build_set_mode(GIMBAL_YAW_MOTOR_ID, 0U, &frame);
+    if (send_frame(&frame) != 0) {
+        return -1;
+    }
+    motor_build_set_mode(GIMBAL_PITCH_MOTOR_ID, 0U, &frame);
+    if (send_frame(&frame) != 0 || send_zero_torque_both() != 0) {
+        return -1;
+    }
+    g_calibration_feedback_active = 1U;
+    g_calibration_phase = 0U;
+    g_calibration_step_tick = now;
+    g_telemetry.command_speed_rpm = 0U;
+    g_telemetry.command_torque_percent = 0U;
+    return 0;
 }
 
 static int send_position_both(int32_t yaw_x100_deg,
@@ -143,6 +200,9 @@ static void enter_fault(uint8_t fault)
 {
     g_telemetry.fault |= fault;
     g_telemetry.state = GIMBAL_STATE_FAULT;
+    g_telemetry.command_torque_percent = 0U;
+    g_calibration_feedback_active = 0U;
+    g_calibration_phase = 0U;
     (void)send_idle_both();
 }
 
@@ -198,6 +258,18 @@ static int actual_position_exceeded_limits(void)
 int gimbal_control_init(void)
 {
     memset(&g_telemetry, 0, sizeof(g_telemetry));
+    g_state_tick = 0U;
+    g_target_tick = 0U;
+    g_stop_step_tick = 0U;
+    g_motion_deadline_tick = 0U;
+    g_target_timeout_ms = 0U;
+    g_start_phase = 0U;
+    g_home_settle_samples = 0U;
+    g_stop_torque_percent = 0U;
+    g_calibration_feedback_active = 0U;
+    g_calibration_phase = 0U;
+    g_calibration_step_tick = 0U;
+    g_calibration_activity_tick = 0U;
     g_timer_frequency = GenericTimerFrequecy();
     g_telemetry.state = GIMBAL_STATE_DISABLED;
     g_telemetry.command_speed_rpm = GIMBAL_DEFAULT_SPEED_RPM;
@@ -220,6 +292,10 @@ int gimbal_control_enable(void)
     update_feedback(GenericTimerRead(GENERIC_TIMER_ID0));
     if (g_telemetry.feedback_valid_mask != 0x03U) {
         return GIMBAL_STATUS_NO_FEEDBACK;
+    }
+    if (stop_calibration_feedback() != 0) {
+        enter_fault(GIMBAL_FAULT_CAN);
+        return GIMBAL_STATUS_CAN_ERROR;
     }
 
     g_telemetry.fault = GIMBAL_FAULT_NONE;
@@ -250,8 +326,11 @@ int gimbal_control_disable(void)
 {
     uint64_t now;
 
-    if (g_telemetry.state == GIMBAL_STATE_DISABLED ||
-        g_telemetry.state == GIMBAL_STATE_STOPPING) {
+    if (g_telemetry.state == GIMBAL_STATE_DISABLED) {
+        return stop_calibration_feedback() == 0 ?
+            GIMBAL_STATUS_OK : GIMBAL_STATUS_CAN_ERROR;
+    }
+    if (g_telemetry.state == GIMBAL_STATE_STOPPING) {
         return GIMBAL_STATUS_OK;
     }
     if (g_telemetry.state == GIMBAL_STATE_FAULT) {
@@ -285,6 +364,8 @@ int gimbal_control_disable(void)
 void gimbal_control_emergency_stop(void)
 {
     (void)send_idle_both();
+    g_calibration_feedback_active = 0U;
+    g_calibration_phase = 0U;
     g_telemetry.state = GIMBAL_STATE_DISABLED;
     g_telemetry.command_timeout_remaining_ms = 0U;
 }
@@ -330,11 +411,17 @@ int gimbal_control_calibrate_limit(uint8_t axis, uint8_t side)
         g_telemetry.state != GIMBAL_STATE_FAULT) {
         return GIMBAL_STATUS_BUSY;
     }
-    update_feedback(GenericTimerRead(GENERIC_TIMER_ID0));
+    uint64_t now = GenericTimerRead(GENERIC_TIMER_ID0);
+
+    update_feedback(now);
     if ((axis == GIMBAL_AXIS_YAW &&
          (g_telemetry.feedback_valid_mask & 0x01U) == 0U) ||
         (axis == GIMBAL_AXIS_PITCH &&
          (g_telemetry.feedback_valid_mask & 0x02U) == 0U)) {
+        if (start_calibration_feedback(now) != 0) {
+            enter_fault(GIMBAL_FAULT_CAN);
+            return GIMBAL_STATUS_CAN_ERROR;
+        }
         return GIMBAL_STATUS_NO_FEEDBACK;
     }
     if (axis > GIMBAL_AXIS_PITCH || side > GIMBAL_LIMIT_MAX) {
@@ -375,6 +462,12 @@ int gimbal_control_calibrate_limit(uint8_t axis, uint8_t side)
     g_telemetry.limits = candidate;
     g_telemetry.limits_valid_mask = candidate.valid_mask;
     g_telemetry.fault &= (uint8_t)~GIMBAL_FAULT_LIMIT_CONFIG;
+    g_calibration_activity_tick = now;
+    if (candidate.valid_mask == GIMBAL_LIMIT_ALL_VALID &&
+        stop_calibration_feedback() != 0) {
+        enter_fault(GIMBAL_FAULT_CAN);
+        return GIMBAL_STATUS_CAN_ERROR;
+    }
     return GIMBAL_STATUS_OK;
 }
 
@@ -386,6 +479,10 @@ int gimbal_control_set_limits(const GimbalLimits *limits)
     }
     if (!limits_are_valid(limits)) {
         return GIMBAL_STATUS_INVALID;
+    }
+    if (stop_calibration_feedback() != 0) {
+        enter_fault(GIMBAL_FAULT_CAN);
+        return GIMBAL_STATUS_CAN_ERROR;
     }
     g_telemetry.limits = *limits;
     g_telemetry.limits_valid_mask = limits->valid_mask;
@@ -412,6 +509,36 @@ void gimbal_control_poll(void)
 
     update_feedback(now);
     g_telemetry.limits_valid_mask = g_telemetry.limits.valid_mask;
+
+    if (g_calibration_feedback_active) {
+        if (now - g_calibration_activity_tick >=
+            ms_to_ticks(GIMBAL_CALIBRATION_TIMEOUT_MS)) {
+            (void)stop_calibration_feedback();
+        } else if (g_calibration_phase == 0U &&
+                   now - g_calibration_step_tick >=
+                       ms_to_ticks(GIMBAL_CALIBRATION_START_DELAY_MS)) {
+            motor_build_enable(GIMBAL_YAW_MOTOR_ID, &frame);
+            if (send_frame(&frame) != 0) {
+                enter_fault(GIMBAL_FAULT_CAN);
+                return;
+            }
+            motor_build_enable(GIMBAL_PITCH_MOTOR_ID, &frame);
+            if (send_frame(&frame) != 0 || send_zero_torque_both() != 0) {
+                enter_fault(GIMBAL_FAULT_CAN);
+                return;
+            }
+            g_calibration_phase = 1U;
+            g_calibration_step_tick = now;
+        } else if (g_calibration_phase == 1U &&
+                   now - g_calibration_step_tick >=
+                       ms_to_ticks(GIMBAL_CALIBRATION_KEEPALIVE_MS)) {
+            if (send_zero_torque_both() != 0) {
+                enter_fault(GIMBAL_FAULT_CAN);
+                return;
+            }
+            g_calibration_step_tick = now;
+        }
+    }
 
     if (g_telemetry.state == GIMBAL_STATE_DISABLED ||
         g_telemetry.state == GIMBAL_STATE_FAULT) {
