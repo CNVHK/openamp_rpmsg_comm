@@ -1,0 +1,4 @@
+interface:
+  display_name: "轮式平衡控制调参"
+  short_description: "Analyze balance logs and tune LQR feedback safely"
+  default_prompt: "使用 $tune-wheel-balance-control 分析平衡日志并规划下一次单变量实机测试。"
