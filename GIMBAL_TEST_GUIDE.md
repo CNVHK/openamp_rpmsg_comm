@@ -128,6 +128,8 @@ starting -> homing -> active
 
 归零应使用约 `5 rpm` 缓慢运动，并在12秒内进入 `active`。若方向错误、接近碰撞或异常发力，立即：
 
+归零和 active 状态会每 50 ms 重发同一个位置目标，以持续获得驱动器反馈；任一轴超过 500 ms 没有新反馈才会进入反馈故障并自动 idle。
+
 ```bash
 sudo ./build/gimbal_test /dev/rpmsg0 estop
 ```

@@ -11,7 +11,7 @@
 #define GIMBAL_HOME_SPEED_RPM 5U
 #define GIMBAL_DEFAULT_SPEED_RPM 20U
 #define GIMBAL_DEFAULT_TORQUE_PERCENT 10U
-#define GIMBAL_FEEDBACK_TIMEOUT_MS 150U
+#define GIMBAL_FEEDBACK_TIMEOUT_MS 500U
 #define GIMBAL_HOME_TIMEOUT_MS 12000U
 #define GIMBAL_START_DELAY_MS 20U
 #define GIMBAL_HOME_TOLERANCE_X100_DEG 100
@@ -27,6 +27,7 @@
 #define GIMBAL_CALIBRATION_START_DELAY_MS 20U
 #define GIMBAL_CALIBRATION_KEEPALIVE_MS 100U
 #define GIMBAL_CALIBRATION_TIMEOUT_MS 30000U
+#define GIMBAL_POSITION_REFRESH_MS 50U
 
 static GimbalTelemetry g_telemetry;
 static uint64_t g_timer_frequency;
@@ -42,6 +43,7 @@ static uint8_t g_calibration_feedback_active;
 static uint8_t g_calibration_phase;
 static uint64_t g_calibration_step_tick;
 static uint64_t g_calibration_activity_tick;
+static uint64_t g_position_refresh_tick;
 
 static uint64_t ms_to_ticks(uint32_t milliseconds)
 {
@@ -270,6 +272,7 @@ int gimbal_control_init(void)
     g_calibration_phase = 0U;
     g_calibration_step_tick = 0U;
     g_calibration_activity_tick = 0U;
+    g_position_refresh_tick = 0U;
     g_timer_frequency = GenericTimerFrequecy();
     g_telemetry.state = GIMBAL_STATE_DISABLED;
     g_telemetry.command_speed_rpm = GIMBAL_DEFAULT_SPEED_RPM;
@@ -402,6 +405,7 @@ int gimbal_control_set_target(int32_t yaw_x100_deg,
     g_telemetry.command_torque_percent = torque_percent;
     g_target_timeout_ms = timeout_ms;
     g_target_tick = GenericTimerRead(GENERIC_TIMER_ID0);
+    g_position_refresh_tick = g_target_tick;
     set_motion_deadline(g_target_tick, yaw_x100_deg, pitch_x100_deg,
                         speed_rpm);
     return GIMBAL_STATUS_OK;
@@ -592,6 +596,7 @@ void gimbal_control_poll(void)
         }
         g_telemetry.state = GIMBAL_STATE_HOMING;
         g_state_tick = now;
+        g_position_refresh_tick = now;
         return;
     }
 
@@ -607,6 +612,16 @@ void gimbal_control_poll(void)
         int pitch_speed = g_telemetry.pitch_speed_rpm < 0 ?
             -(int)g_telemetry.pitch_speed_rpm :
              (int)g_telemetry.pitch_speed_rpm;
+
+        if (now - g_position_refresh_tick >=
+            ms_to_ticks(GIMBAL_POSITION_REFRESH_MS)) {
+            if (send_position_both(0, 0, GIMBAL_HOME_SPEED_RPM,
+                                   GIMBAL_DEFAULT_TORQUE_PERCENT) != 0) {
+                enter_fault(GIMBAL_FAULT_CAN);
+                return;
+            }
+            g_position_refresh_tick = now;
+        }
 
         if (yaw_error <= GIMBAL_HOME_TOLERANCE_X100_DEG &&
             pitch_error <= GIMBAL_HOME_TOLERANCE_X100_DEG &&
@@ -650,6 +665,19 @@ void gimbal_control_poll(void)
             enter_fault(GIMBAL_FAULT_CAN);
         }
         return;
+    }
+
+    if (g_telemetry.state == GIMBAL_STATE_ACTIVE &&
+        now - g_position_refresh_tick >=
+            ms_to_ticks(GIMBAL_POSITION_REFRESH_MS)) {
+        if (send_position_both(g_telemetry.yaw_target_x100_deg,
+                               g_telemetry.pitch_target_x100_deg,
+                               g_telemetry.command_speed_rpm,
+                               g_telemetry.command_torque_percent) != 0) {
+            enter_fault(GIMBAL_FAULT_CAN);
+            return;
+        }
+        g_position_refresh_tick = now;
     }
 
     if (g_telemetry.state == GIMBAL_STATE_ACTIVE &&

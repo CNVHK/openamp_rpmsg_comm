@@ -209,6 +209,25 @@ static void test_enable_feedback_wakeup(void)
     assert(g_sent[10].data[2] == 0x60U);
 }
 
+static void test_position_command_refresh(void)
+{
+    GimbalLimits limits = test_limits();
+    unsigned int before;
+
+    g_now = 1000U;
+    g_sent_count = 0U;
+    assert(gimbal_control_init() == 0);
+    set_feedback(0, 0, 0, 0);
+    assert(gimbal_control_set_limits(&limits) == GIMBAL_STATUS_OK);
+    start_and_finish_homing();
+    before = g_sent_count;
+    advance_ms(50U);
+    gimbal_control_poll();
+    assert(g_sent_count == before + 2U);
+    assert(g_sent[before].data[0] == 0x25U);
+    assert(g_sent[before + 1U].data[0] == 0x25U);
+}
+
 static void test_controlled_disable(void)
 {
     GimbalLimits limits = test_limits();
@@ -256,6 +275,7 @@ int main(void)
     test_calibration();
     test_calibration_feedback_wakeup();
     test_enable_feedback_wakeup();
+    test_position_command_refresh();
     test_controlled_disable();
     test_motion_timeout();
     puts("gimbal_controller_test: PASS");
