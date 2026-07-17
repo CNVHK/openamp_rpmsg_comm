@@ -105,6 +105,8 @@ fault=0x08
 
 托住相机，准备随时执行 `estop`：
 
+如果 idle 状态没有周期反馈，`enable` 会先在零力矩模式唤醒两轴反馈，工具自动等待后再启动归零；不要连续重复执行 `enable`。
+
 ```bash
 sudo ./build/gimbal_test /dev/rpmsg0 enable
 ```

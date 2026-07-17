@@ -217,7 +217,11 @@ sudo ./build/balance_logger --rate 20
 ```bash
 sudo ./build/rpmsg_client /dev/rpmsg0 motor-fault 1
 sudo ./build/rpmsg_client /dev/rpmsg0 motor-fault 2
+sudo ./build/rpmsg_client /dev/rpmsg0 motor-fault 3
+sudo ./build/rpmsg_client /dev/rpmsg0 motor-fault 4
 ```
+
+`motor-fault` 支持 ID 1～4；读取 ID 3/4 时云台必须处于 `disabled` 或 `fault`。`torque-test` 仍只允许 ID 1/2。
 
 轮速三方对照诊断只能在平衡控制停用且车轮架空或机械约束时运行。它会短时施加不超过 `0.10 N*m` 的力矩，同时比较周期反馈 `0x2A`、实时速度寄存器 `0x0006` 和编码器位置差分得到的速度，结束后自动清零力矩并进入 idle：
 
@@ -279,6 +283,8 @@ sudo ./build/gimbal_test /dev/rpmsg0 limits -60 60 -25 35 CONFIRM
 ### 启动归零和位置控制
 
 边界有效后启动。两台电机进入位置模式，并以 `5 rpm` 缓慢归零；状态依次经过 `starting`、`homing`、`active`：
+
+如果两轴已经 idle、周期反馈停止，`enable` 会先以零力矩模式自动唤醒反馈；只有收到两轴新鲜角度后才进入位置模式。客户端会等待并自动重试，无需重复手动执行 `enable`。
 
 ```bash
 sudo ./build/gimbal_test /dev/rpmsg0 enable

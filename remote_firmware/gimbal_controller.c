@@ -280,6 +280,7 @@ int gimbal_control_init(void)
 int gimbal_control_enable(void)
 {
     MotorCanFrame frame;
+    uint64_t now;
 
     if (g_telemetry.state != GIMBAL_STATE_DISABLED &&
         g_telemetry.state != GIMBAL_STATE_FAULT) {
@@ -289,8 +290,13 @@ int gimbal_control_enable(void)
         g_telemetry.fault = GIMBAL_FAULT_LIMIT_CONFIG;
         return GIMBAL_STATUS_LIMITS_NOT_READY;
     }
-    update_feedback(GenericTimerRead(GENERIC_TIMER_ID0));
+    now = GenericTimerRead(GENERIC_TIMER_ID0);
+    update_feedback(now);
     if (g_telemetry.feedback_valid_mask != 0x03U) {
+        if (start_calibration_feedback(now) != 0) {
+            enter_fault(GIMBAL_FAULT_CAN);
+            return GIMBAL_STATUS_CAN_ERROR;
+        }
         return GIMBAL_STATUS_NO_FEEDBACK;
     }
     if (stop_calibration_feedback() != 0) {
@@ -317,7 +323,7 @@ int gimbal_control_enable(void)
         enter_fault(GIMBAL_FAULT_CAN);
         return GIMBAL_STATUS_CAN_ERROR;
     }
-    g_state_tick = GenericTimerRead(GENERIC_TIMER_ID0);
+    g_state_tick = now;
     g_telemetry.state = GIMBAL_STATE_STARTING;
     return GIMBAL_STATUS_OK;
 }

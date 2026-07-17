@@ -565,6 +565,7 @@ static void handle_can_torque_test(const uint8_t *payload, uint8_t length)
 static void handle_can_motor_fault(const uint8_t *payload, uint8_t length)
 {
     const BalanceTelemetry *balance = balance_control_get_telemetry();
+    const GimbalTelemetry *gimbal = gimbal_control_get_telemetry();
     MotorCanFrame can_frame;
     MotorRegisterValue value;
     uint8_t motor_id;
@@ -577,7 +578,10 @@ static void handle_can_motor_fault(const uint8_t *payload, uint8_t length)
         return;
     }
     motor_id = payload[0];
-    if (motor_id < 1U || motor_id > 2U) {
+    if (motor_id < 1U || motor_id > 4U ||
+        (is_gimbal_motor(motor_id) &&
+         gimbal->state != GIMBAL_STATE_DISABLED &&
+         gimbal->state != GIMBAL_STATE_FAULT)) {
         return;
     }
 

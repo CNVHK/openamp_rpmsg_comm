@@ -9,7 +9,7 @@
 #include <sys/select.h>
 #include <unistd.h>
 
-#define RPMSG_CLIENT_VERSION "0.18.0-lqr-runtime-tuning"
+#define RPMSG_CLIENT_VERSION "0.18.1-gimbal-diagnostics"
 #define RAD_PER_DEG 0.017453292519943295f
 
 static int wait_readable(int fd, int timeout_ms)
@@ -263,7 +263,7 @@ static int build_command(int argc, char **argv, uint8_t *type, uint8_t *payload,
 
         if (argc < 4) return -1;
         motor_id = strtoul(argv[3], &end, 0);
-        if (end == argv[3] || *end != '\0' || motor_id < 1U || motor_id > 2U) {
+        if (end == argv[3] || *end != '\0' || motor_id < 1U || motor_id > 4U) {
             return -1;
         }
         *type = CMD_CAN_MOTOR_FAULT;

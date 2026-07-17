@@ -186,6 +186,29 @@ static void test_calibration_feedback_wakeup(void)
     assert(g_sent[g_sent_count - 1U].data[2] == 0xa0U);
 }
 
+static void test_enable_feedback_wakeup(void)
+{
+    GimbalLimits limits = test_limits();
+
+    g_now = 1000U;
+    g_sent_count = 0U;
+    memset(g_feedback, 0, sizeof(g_feedback));
+    assert(gimbal_control_init() == 0);
+    assert(gimbal_control_set_limits(&limits) == GIMBAL_STATUS_OK);
+    assert(gimbal_control_enable() == GIMBAL_STATUS_NO_FEEDBACK);
+    assert(g_sent_count == 4U);
+
+    advance_ms(20U);
+    gimbal_control_poll();
+    assert(g_sent_count == 8U);
+    set_feedback(0, 0, 0, 0);
+    assert(gimbal_control_enable() == GIMBAL_STATUS_OK);
+    assert(gimbal_control_get_telemetry()->state == GIMBAL_STATE_STARTING);
+    assert(g_sent_count == 12U);
+    assert(g_sent[8].data[2] == 0xa0U);
+    assert(g_sent[10].data[2] == 0x60U);
+}
+
 static void test_controlled_disable(void)
 {
     GimbalLimits limits = test_limits();
@@ -232,6 +255,7 @@ int main(void)
     test_target_and_limit_fault();
     test_calibration();
     test_calibration_feedback_wakeup();
+    test_enable_feedback_wakeup();
     test_controlled_disable();
     test_motion_timeout();
     puts("gimbal_controller_test: PASS");

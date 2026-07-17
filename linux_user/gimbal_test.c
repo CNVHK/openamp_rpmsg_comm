@@ -216,7 +216,9 @@ static int send_gimbal_command(int fd, uint8_t type, const uint8_t *payload,
     return print_gimbal_reply(&reply);
 }
 
-static int calibrate_gimbal_limit(int fd, const uint8_t *payload)
+static int send_gimbal_command_with_feedback_retry(
+    int fd, uint8_t type, const uint8_t *payload, uint8_t payload_len,
+    const char *action)
 {
     RpmsgFrame reply;
     uint8_t status = 0xffU;
@@ -227,9 +229,8 @@ static int calibrate_gimbal_limit(int fd, const uint8_t *payload)
         if (attempt != 0U && sleep_ms(LIMIT_FEEDBACK_RETRY_MS) != 0) {
             return -1;
         }
-        if (send_command_reply(fd, CMD_GIMBAL_CALIBRATE_LIMIT, payload, 2U,
-                               &reply) != 0 ||
-            reply.type != CMD_GIMBAL_CALIBRATE_LIMIT ||
+        if (send_command_reply(fd, type, payload, payload_len, &reply) != 0 ||
+            reply.type != type ||
             reply.length < GIMBAL_TELEMETRY_PAYLOAD_SIZE) {
             return -1;
         }
@@ -240,8 +241,9 @@ static int calibrate_gimbal_limit(int fd, const uint8_t *payload)
         }
         if (attempt == 0U) {
             (void)print_gimbal_reply(&reply);
-            printf("Waking both axes in zero-torque calibration mode; "
-                   "support the camera because holding torque is zero...\n");
+            printf("Waking both axes in zero-torque mode for %s; "
+                   "support the camera because holding torque is zero...\n",
+                   action);
         }
         if (attempt == LIMIT_FEEDBACK_RETRIES) {
             fprintf(stderr, "motor feedback did not start within %u ms\n",
@@ -250,6 +252,12 @@ static int calibrate_gimbal_limit(int fd, const uint8_t *payload)
         }
     }
     return -1;
+}
+
+static int calibrate_gimbal_limit(int fd, const uint8_t *payload)
+{
+    return send_gimbal_command_with_feedback_retry(
+        fd, CMD_GIMBAL_CALIBRATE_LIMIT, payload, 2U, "limit calibration");
 }
 
 static int degrees_to_x100(double degrees, int32_t *result)
@@ -412,7 +420,8 @@ int main(int argc, char **argv)
         }
     } else if (strcmp(command, "init") == 0 || strcmp(command, "enable") == 0) {
         printf("Starting gimbal and slowly homing both axes to zero.\n");
-        ret = send_gimbal_command(fd, CMD_GIMBAL_ENABLE, NULL, 0U);
+        ret = send_gimbal_command_with_feedback_retry(
+            fd, CMD_GIMBAL_ENABLE, NULL, 0U, "safe startup");
     } else if (strcmp(command, "set") == 0 && argc >= 5) {
         double yaw;
         double pitch;
