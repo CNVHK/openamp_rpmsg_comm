@@ -3,7 +3,7 @@ CFLAGS ?= -std=c99 -Wall -Wextra -I./src
 PYTHON ?= python3
 BUILD_DIR := build
 
-.PHONY: all test test-python client logger gimbal broker install-rpmsg-broker install-gimbal-daemon clean
+.PHONY: all test test-python client logger gimbal broker firmware-elf install-rpmsg-broker install-gimbal-daemon clean
 
 all: test client logger gimbal broker
 
@@ -26,6 +26,9 @@ logger: $(BUILD_DIR) $(BUILD_DIR)/balance_logger
 gimbal: $(BUILD_DIR) $(BUILD_DIR)/gimbal_test
 
 broker: $(BUILD_DIR) $(BUILD_DIR)/rpmsg-broker
+
+firmware-elf:
+	./tools/build_openamp_elf.sh
 
 install-rpmsg-broker: $(BUILD_DIR)/rpmsg-broker
 	install -d -m 0755 /usr/local/sbin

@@ -26,9 +26,15 @@ roll/roll_rate 融合。不要同时启用轮式平衡，也不要把 roll 直�
 
 ```bash
 make
-makeelf
+make firmware-elf
 scpelf
 reloadrproc
+```
+
+若保留 `makeelf` 别名，应让它执行仓库目标，不能直接在旧 SDK 快照上运行 `make`：
+
+```bash
+alias makeelf='make firmware-elf'
 ```
 
 确认新客户端版本和从核通信：
