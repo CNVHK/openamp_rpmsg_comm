@@ -109,6 +109,7 @@ static void test_limits_and_homing(void)
     assert(g_sent[0].id == 0x603U && g_sent[0].data[2] == 0x60U);
     assert(g_sent[1].id == 0x604U && g_sent[1].data[2] == 0x60U);
     assert(g_sent[4].data[0] == 0x25U && g_sent[5].data[0] == 0x25U);
+    assert(g_sent[4].data[7] == 15U && g_sent[5].data[7] == 15U);
 }
 
 static void test_target_and_limit_fault(void)

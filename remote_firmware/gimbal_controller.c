@@ -361,9 +361,6 @@ int gimbal_control_disable(void)
             g_telemetry.pitch_position_x100_deg;
     }
     g_stop_torque_percent = g_telemetry.command_torque_percent;
-    if (g_stop_torque_percent > GIMBAL_DEFAULT_TORQUE_PERCENT) {
-        g_stop_torque_percent = GIMBAL_DEFAULT_TORQUE_PERCENT;
-    }
     g_stop_step_tick = now;
     g_telemetry.state = GIMBAL_STATE_STOPPING;
     if (send_position_both(g_telemetry.yaw_target_x100_deg,
@@ -596,7 +593,7 @@ void gimbal_control_poll(void)
             return;
         }
         if (send_position_both(0, 0, GIMBAL_HOME_SPEED_RPM,
-                               GIMBAL_DEFAULT_TORQUE_PERCENT) != 0) {
+                               g_telemetry.command_torque_percent) != 0) {
             enter_fault(GIMBAL_FAULT_CAN);
             return;
         }
@@ -622,7 +619,7 @@ void gimbal_control_poll(void)
         if (now - g_position_refresh_tick >=
             ms_to_ticks(GIMBAL_POSITION_REFRESH_MS)) {
             if (send_position_both(0, 0, GIMBAL_HOME_SPEED_RPM,
-                                   GIMBAL_DEFAULT_TORQUE_PERCENT) != 0) {
+                                   g_telemetry.command_torque_percent) != 0) {
                 enter_fault(GIMBAL_FAULT_CAN);
                 return;
             }
