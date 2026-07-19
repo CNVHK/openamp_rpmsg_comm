@@ -152,17 +152,17 @@ if (reply_len > 0) {
 }
 ```
 
-4. 回到 Pi OS 根目录重新编译从核固件：
+4. 在装有飞腾 SDK 的编译机上增量编译从核固件；不要在飞腾派本机执行：
 
 ```bash
-cd ~/phytium-work/phytium-pi-os
-make phytium-standalone-rebuild
+cd ~/phytium-work/openamp_rpmsg_comm
+make firmware-elf
 ```
 
 5. 拷贝新固件到飞腾派：
 
 ```bash
-scp output/build/phytium-standalone-openamp-v1.0/example/system/amp/openamp_for_linux/phytiumpi_aarch64_firefly_openamp_core0.elf \
+scp ../phytium-pi-os/output/build/phytium-standalone-openamp-v1.0/example/system/amp/openamp_for_linux/phytiumpi_aarch64_firefly_openamp_core0.elf \
     user@<board-ip>:/home/user/openamp_core0.elf
 ```
 

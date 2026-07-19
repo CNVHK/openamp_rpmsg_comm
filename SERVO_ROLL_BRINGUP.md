@@ -22,19 +22,31 @@ roll/roll_rate 融合。不要同时启用轮式平衡，也不要把 roll 直�
 
 ## 2. 编译与部署
 
-按项目现有增量流程构建，不需要重建系统镜像：
+从核 ELF 只能在装有飞腾裸机 SDK 和交叉编译器的编译机上生成。以下命令在编译机执行，
+不在飞腾派上执行：
 
 ```bash
-make
+cd ~/phytium-work/openamp_rpmsg_comm
+git pull --ff-only
 make firmware-elf
-scpelf
-reloadrproc
+scp ../phytium-pi-os/output/build/phytium-standalone-openamp-v1.0/example/system/amp/openamp_for_linux/phytiumpi_aarch64_firefly_openamp_core0.elf \
+    user@192.168.137.167:/home/user/openamp_core0.elf
 ```
 
 若保留 `makeelf` 别名，应让它执行仓库目标，不能直接在旧 SDK 快照上运行 `make`：
 
 ```bash
 alias makeelf='make firmware-elf'
+```
+
+以下命令在飞腾派上执行。飞腾派可以使用本机 GCC 编译 Linux 客户端，但不能编译从核
+裸机 ELF：
+
+```bash
+cd /home/user/openamp_rpmsg_comm
+git pull --ff-only
+make client
+reloadrproc
 ```
 
 确认新客户端版本和从核通信：
