@@ -16,7 +16,7 @@ void leg_robot_get_measured_calibration(
     calibration->geometry.lower_link_m = 0.145f;
     calibration->geometry.front_elbow_branch = -1;
     calibration->geometry.rear_elbow_branch = 1;
-    calibration->geometry.foot_branch = -1;
+    calibration->geometry.foot_branch = 1;
     calibration->reference_support_offset_m = 0.0f;
     calibration->reference_leg_height_m = 0.140f;
     calibration->reference_effective_angles.front_angle_rad =

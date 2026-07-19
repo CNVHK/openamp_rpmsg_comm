@@ -56,6 +56,8 @@ joint_angle = alpha +/- beta
 
 正负号决定膝关节解支。左右腿的机械结构对称，但前后支链的解支通常相反。代码通过
 `front_elbow_branch`、`rear_elbow_branch` 和 `foot_branch` 显式保存解支，不在运行时猜测。
+当前实机参考构型使用 `front=-1`、`rear=+1`、`foot=+1`。标定加载时必须执行一次
+逆解到正解的往返检查，重建坐标误差超过 `0.1 mm` 时拒绝该配置。
 
 ## 3. 必须测量的数据
 

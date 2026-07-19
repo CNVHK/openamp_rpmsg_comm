@@ -4,6 +4,7 @@
 #include <stddef.h>
 
 #define LEG_EPSILON 1.0e-6f
+#define LEG_POSITION_TOLERANCE_M 1.0e-4f
 
 int leg_kinematics_config_valid(const LegKinematicsConfig *config)
 {
@@ -123,23 +124,37 @@ int leg_kinematics_calibration_valid(
     const LegKinematicsCalibration *calibration)
 {
     LegKinematicsAngles reference_physical;
+    float reconstructed_offset;
+    float reconstructed_height;
 
-    return calibration != NULL &&
-        leg_kinematics_config_valid(&calibration->geometry) &&
-        isfinite(calibration->reference_support_offset_m) &&
-        isfinite(calibration->reference_leg_height_m) &&
-        calibration->reference_leg_height_m > 0.0f &&
-        isfinite(calibration->reference_effective_angles.front_angle_rad) &&
-        isfinite(calibration->reference_effective_angles.rear_angle_rad) &&
-        (calibration->front_effective_direction == -1 ||
-         calibration->front_effective_direction == 1) &&
-        (calibration->rear_effective_direction == -1 ||
-         calibration->rear_effective_direction == 1) &&
+    if (calibration == NULL ||
+        !leg_kinematics_config_valid(&calibration->geometry) ||
+        !isfinite(calibration->reference_support_offset_m) ||
+        !isfinite(calibration->reference_leg_height_m) ||
+        calibration->reference_leg_height_m <= 0.0f ||
+        !isfinite(calibration->reference_effective_angles.front_angle_rad) ||
+        !isfinite(calibration->reference_effective_angles.rear_angle_rad) ||
+        (calibration->front_effective_direction != -1 &&
+         calibration->front_effective_direction != 1) ||
+        (calibration->rear_effective_direction != -1 &&
+         calibration->rear_effective_direction != 1) ||
         leg_inverse_kinematics(
             &calibration->geometry,
             calibration->reference_support_offset_m,
             calibration->reference_leg_height_m,
-            &reference_physical) == 0;
+            &reference_physical) != 0 ||
+        leg_forward_kinematics(&calibration->geometry,
+                               &reference_physical,
+                               &reconstructed_offset,
+                               &reconstructed_height) != 0) {
+        return 0;
+    }
+    return fabsf(reconstructed_offset -
+                 calibration->reference_support_offset_m) <=
+               LEG_POSITION_TOLERANCE_M &&
+        fabsf(reconstructed_height -
+              calibration->reference_leg_height_m) <=
+            LEG_POSITION_TOLERANCE_M;
 }
 
 int leg_calibrated_inverse_kinematics(
@@ -150,6 +165,8 @@ int leg_calibrated_inverse_kinematics(
 {
     LegKinematicsAngles reference_physical;
     LegKinematicsAngles target_physical;
+    float reconstructed_offset;
+    float reconstructed_height;
 
     if (!leg_kinematics_calibration_valid(calibration) ||
         effective_angles == NULL ||
@@ -161,7 +178,15 @@ int leg_calibrated_inverse_kinematics(
         leg_inverse_kinematics(&calibration->geometry,
                                support_offset_m,
                                leg_height_m,
-                               &target_physical) != 0) {
+                               &target_physical) != 0 ||
+        leg_forward_kinematics(&calibration->geometry,
+                               &target_physical,
+                               &reconstructed_offset,
+                               &reconstructed_height) != 0 ||
+        fabsf(reconstructed_offset - support_offset_m) >
+            LEG_POSITION_TOLERANCE_M ||
+        fabsf(reconstructed_height - leg_height_m) >
+            LEG_POSITION_TOLERANCE_M) {
         return -1;
     }
 
