@@ -115,7 +115,7 @@ PWM 参数为：
 rprun servocenter CONFIRM
 rprun servo 0 90 90 90 CONFIRM
 rprun servo 180 90 90 90 CONFIRM
-rprun servo 90 90 90 90 CONFIRM
+rprun servo 45 135 45 135 CONFIRM
 ```
 
 Linux 端回传：

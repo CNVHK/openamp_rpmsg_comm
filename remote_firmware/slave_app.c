@@ -117,7 +117,7 @@ static void handle_servo_set4(const uint8_t *payload, uint8_t length)
 
 static void handle_servo_center(void)
 {
-    const uint16_t angles[PHYTIUM_SERVO_NUM] = {900, 900, 900, 900};
+    const uint16_t angles[PHYTIUM_SERVO_NUM] = {450, 1350, 450, 1350};
 
     if (balance_control_get_telemetry()->state != BALANCE_STATE_DISABLED) {
         return;
@@ -133,7 +133,7 @@ static void handle_servo_polarity(const uint8_t *payload, uint8_t length)
     }
 
     phytium_servo_set_polarity(payload[0]);
-    const uint16_t angles[PHYTIUM_SERVO_NUM] = {900, 900, 900, 900};
+    const uint16_t angles[PHYTIUM_SERVO_NUM] = {450, 1350, 450, 1350};
     (void)servo_motion_adopt(angles);
 }
 

@@ -37,7 +37,10 @@ reloadrproc
 rprun heartbeat
 ```
 
-客户端版本应为 `0.20.0-servo-safe-adopt` 或更高。
+客户端版本应为 `0.20.1-servo-safe-default` 或更高。
+
+历史命令名 `servocenter` 现在不再表示四路 90 度；它被重新定义为腿部安全参考原始角
+`[45,135,45,135]`。固件启动缓存和禁用状态下的 PWM 预装值也使用同一参考值。
 
 ## 3. 单独验证 IMU Roll
 

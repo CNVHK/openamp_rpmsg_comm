@@ -11,7 +11,7 @@
 #include <sys/select.h>
 #include <unistd.h>
 
-#define RPMSG_CLIENT_VERSION "0.20.0-servo-safe-adopt"
+#define RPMSG_CLIENT_VERSION "0.20.1-servo-safe-default"
 #define RAD_PER_DEG 0.017453292519943295f
 
 static int wait_readable(int fd, int timeout_ms)
@@ -124,7 +124,7 @@ static void usage(const char *prog)
     printf("  %s <rpmsg_dev> motor-speed-diag <motor_id> <torque_nm> [duration_ms]\n", prog);
     printf("  %s <rpmsg_dev> servo <s0_deg> <s1_deg> <s2_deg> <s3_deg> CONFIRM\n", prog);
     printf("  %s <rpmsg_dev> servopol <0..7> CONFIRM\n", prog);
-    printf("  %s <rpmsg_dev> servocenter CONFIRM\n", prog);
+    printf("  %s <rpmsg_dev> servocenter CONFIRM  # legacy name: raw safe reference 45,135,45,135\n", prog);
     printf("  %s <rpmsg_dev> servo-move <duration_ms> <s0_deg> <s1_deg> <s2_deg> <s3_deg>\n", prog);
     printf("  %s <rpmsg_dev> leg-joints <duration_ms> <right_front_deg> <right_rear_deg> <left_front_deg> <left_rear_deg>\n", prog);
     printf("  %s <rpmsg_dev> leg-adopt <right_front_deg> <right_rear_deg> <left_front_deg> <left_rear_deg> CONFIRM\n", prog);
@@ -151,7 +151,7 @@ static void usage(const char *prog)
     printf("  %s /dev/rpmsg0 heartbeat\n", prog);
     printf("  %s /dev/rpmsg0 init 1\n", prog);
     printf("  %s /dev/rpmsg0 test\n", prog);
-    printf("  %s /dev/rpmsg0 servo 90 90 90 90 CONFIRM\n", prog);
+    printf("  %s /dev/rpmsg0 servo 45 135 45 135 CONFIRM\n", prog);
     printf("  %s /dev/rpmsg0 servopol 4 CONFIRM\n", prog);
     printf("  %s /dev/rpmsg0 servocenter CONFIRM\n", prog);
     printf("  %s /dev/rpmsg0 servo-move 3000 85 95 85 95\n", prog);

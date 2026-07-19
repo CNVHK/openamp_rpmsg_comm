@@ -60,16 +60,21 @@ static void reset_fixture(void)
     g_write_count = 0U;
     g_disable_count = 0U;
     for (uint8_t i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
-        g_debug.angle_deg[i] = 90U;
-        g_debug.angle_x10_deg[i] = 900U;
-        g_debug.pulse_us[i] = 1500U;
+        static const uint16_t safe_raw[PHYTIUM_SERVO_NUM] = {
+            450U, 1350U, 450U, 1350U
+        };
+        g_debug.angle_deg[i] = safe_raw[i] / 10U;
+        g_debug.angle_x10_deg[i] = safe_raw[i];
+        g_debug.pulse_us[i] = 0U;
     }
     assert(servo_motion_init() == 0);
 }
 
 static void test_synchronized_interpolation(void)
 {
-    const uint16_t adopted[PHYTIUM_SERVO_NUM] = {900U, 900U, 900U, 900U};
+    const uint16_t adopted[PHYTIUM_SERVO_NUM] = {
+        450U, 1350U, 450U, 1350U
+    };
     const uint16_t target[PHYTIUM_SERVO_NUM] = {1000U, 800U, 1100U, 700U};
     const ServoMotionTelemetry *telemetry;
 
@@ -87,10 +92,10 @@ static void test_synchronized_interpolation(void)
     advance_ms(500U);
     servo_motion_poll();
     telemetry = servo_motion_get_telemetry();
-    assert(telemetry->current_angle_x10_deg[0] == 950U);
-    assert(telemetry->current_angle_x10_deg[1] == 850U);
-    assert(telemetry->current_angle_x10_deg[2] == 1000U);
-    assert(telemetry->current_angle_x10_deg[3] == 800U);
+    assert(telemetry->current_angle_x10_deg[0] == 725U);
+    assert(telemetry->current_angle_x10_deg[1] == 1075U);
+    assert(telemetry->current_angle_x10_deg[2] == 775U);
+    assert(telemetry->current_angle_x10_deg[3] == 1025U);
     assert(telemetry->remaining_ms == 500U);
 
     advance_ms(500U);
@@ -105,8 +110,12 @@ static void test_synchronized_interpolation(void)
 
 static void test_validation_and_stop(void)
 {
-    const uint16_t valid[PHYTIUM_SERVO_NUM] = {900U, 900U, 900U, 900U};
-    const uint16_t invalid[PHYTIUM_SERVO_NUM] = {900U, 1801U, 900U, 900U};
+    const uint16_t valid[PHYTIUM_SERVO_NUM] = {
+        450U, 1350U, 450U, 1350U
+    };
+    const uint16_t invalid[PHYTIUM_SERVO_NUM] = {
+        450U, 1801U, 450U, 1350U
+    };
 
     reset_fixture();
     assert(servo_motion_start(valid, 99U) == SERVO_MOTION_INVALID);

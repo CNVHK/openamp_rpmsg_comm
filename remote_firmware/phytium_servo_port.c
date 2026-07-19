@@ -35,14 +35,17 @@ static FPwmCtrl g_pwm_ctrl[FPWM_NUM];
 static int g_servo_ready = 0;
 static int g_servo_outputs_enabled = 0;
 static uint8_t g_servo_polarity = FPWM_POLARITY_NORMAL;
+static const uint16_t g_safe_reference_x10_deg[PHYTIUM_SERVO_NUM] = {
+    450U, 1350U, 450U, 1350U
+};
 static PhytiumServoDebugState g_servo_debug = {
     .init_ret = -99,
     .last_ret = -99,
     .last_servo_id = 0xff,
     .last_pwm_id = 0xff,
     .last_channel = 0xff,
-    .angle_deg = {90, 90, 90, 90},
-    .angle_x10_deg = {900, 900, 900, 900},
+    .angle_deg = {45, 135, 45, 135},
+    .angle_x10_deg = {450, 1350, 450, 1350},
     .pulse_us = {0, 0, 0, 0},
 };
 
@@ -129,7 +132,9 @@ int phytium_servo_init(void)
 
     memset(g_pwm_ctrl, 0, sizeof(g_pwm_ctrl));
     memset(pwm_inited, 0, sizeof(pwm_inited));
-    servo_fill_default_cfg(&db_cfg, &pwm_cfg, 1500);
+    servo_fill_default_cfg(&db_cfg, &pwm_cfg,
+                           servo_angle_x10_to_pulse_us(
+                               g_safe_reference_x10_deg[0]));
 
     FIOMuxInit();
 
@@ -183,6 +188,9 @@ int phytium_servo_init(void)
             continue;
         }
 
+        servo_fill_default_cfg(&db_cfg, &pwm_cfg,
+                               servo_angle_x10_to_pulse_us(
+                                   g_safe_reference_x10_deg[i]));
         FIOPadSetPwmMux(map->pwm_id, map->channel);
         ret = FPwmVariableSet(&g_pwm_ctrl[map->pwm_id], map->channel, &pwm_cfg);
         if (ret != FPWM_SUCCESS) {
