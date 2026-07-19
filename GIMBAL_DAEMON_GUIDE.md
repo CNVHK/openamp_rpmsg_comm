@@ -1,8 +1,9 @@
 # Gimbal daemon
 
-`gimbal-daemon` is the single Linux owner of `/dev/rpmsg0` for low-frequency
-voice and operator commands. It does not expose calibration, permanent-zero,
-limit-reset, sweep, or test commands.
+`rpmsg-broker` is the single Linux owner of `/dev/rpmsg0`. `gimbal-daemon`
+connects to the broker and provides low-frequency voice and operator commands.
+It does not expose calibration, permanent-zero, limit-reset, sweep, or test
+commands.
 
 The first deployment is intentionally conservative:
 
@@ -25,8 +26,10 @@ Keep the gimbal disabled, then run:
 
 ```bash
 cd /home/user/openamp_rpmsg_comm
+sudo make install-rpmsg-broker
 sudo make install-gimbal-daemon
 sudo systemctl daemon-reload
+sudo systemctl enable --now rpmsg-broker.service
 sudo systemctl enable --now gimbal-daemon.service
 ```
 
@@ -37,7 +40,8 @@ sudo systemctl status gimbal-daemon.service --no-pager -l
 gimbalctl status
 ```
 
-Do not run `gimbal_test` while the daemon is active.
+Stop `gimbal-daemon` before calibration or test commands that alter the gimbal
+state. Keep `rpmsg-broker` running; `gimbal_test` also uses the broker.
 
 ## Apply configuration changes
 

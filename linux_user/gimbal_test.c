@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "../src/rpmsg_protocol.h"
+#include "../src/rpmsg_transport.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -590,9 +591,9 @@ int main(int argc, char **argv)
     signal(SIGINT, request_stop);
     signal(SIGTERM, request_stop);
 
-    fd = open(device, O_RDWR);
+    fd = rpmsg_transport_open(device);
     if (fd < 0) {
-        perror("open rpmsg device");
+        perror("connect rpmsg broker (use direct:/dev/rpmsg0 only with broker stopped)");
         return 1;
     }
 

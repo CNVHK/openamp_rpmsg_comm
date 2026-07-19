@@ -1,4 +1,5 @@
 #include "../src/rpmsg_protocol.h"
+#include "../src/rpmsg_transport.h"
 
 #include <fcntl.h>
 #include <math.h>
@@ -594,9 +595,9 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    int fd = open(dev, O_RDWR);
+    int fd = rpmsg_transport_open(dev);
     if (fd < 0) {
-        perror("open rpmsg device");
+        perror("connect rpmsg broker (use direct:/dev/rpmsg0 only with broker stopped)");
         return 1;
     }
 

@@ -101,6 +101,14 @@ reloadrproc
 `systemctl restart` 可用于脚本、SSH 和未加载 `.bashrc` 的终端，因而更适合作为
 固件更新后的标准重载方法。
 
+## Linux 统一 RPMsg Broker
+
+`rpmsg-broker` 是 Linux 侧唯一直接打开 `/dev/rpmsg0` 的进程。`rprun`、
+`balance_logger`、`gimbal_test` 和 `gimbal-daemon` 都通过
+`/run/rpmsg-broker/rpmsg.sock` 收发，因而可以并存，不会竞争回复。
+
+安装和完整验收步骤见 [RPMSG_BROKER_GUIDE.md](RPMSG_BROKER_GUIDE.md)。
+
 ## CAN 电机控制接入
 
 电机 CAN 帧组装代码位于：
@@ -237,9 +245,8 @@ sudo ./build/balance_logger --rate 20
 日志不会变成 root 所有。CSV 包含 `read_ok`、RPMsg `latency_us`、从核
 `loop_count`、真实 `state/fault`、LQR 状态、力矩、电流和原始轮速。
 
-同一个 `/dev/rpmsg0` 上的多个读取者可能竞争回复。日志器运行期间不要另开
-终端执行 `rprun`；它已经每秒显示一次状态、故障、俯仰角、速度、实际采样率
-和累计错误数。需要修改配置时，先按 `Ctrl+C` 停止日志器。
+启用 `rpmsg-broker` 后，日志器运行期间可以同时执行 `rprun` 和
+`gimbalctl`。所有请求由 Broker 串行写入从核，并按 sequence 返回给原客户端。
 
 `pvt 1 1000 100 20` 含义：
 

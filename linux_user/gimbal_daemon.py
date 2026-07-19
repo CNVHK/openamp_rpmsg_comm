@@ -36,7 +36,7 @@ STATUS_OK = 0
 STATUS_NO_FEEDBACK = 3
 
 DEFAULT_SOCKET = "/run/gimbal-daemon/gimbal.sock"
-DEFAULT_DEVICE = "/dev/rpmsg0"
+DEFAULT_BROKER_SOCKET = "/run/rpmsg-broker/rpmsg.sock"
 DEFAULT_CONFIG = "/home/user/openamp_rpmsg_comm/gimbal.conf"
 
 
@@ -190,31 +190,34 @@ def decode_frame(data: bytes) -> tuple[int, int, bytes]:
 
 
 class RpmsgGimbal:
-    def __init__(self, device: str, config: GimbalConfig):
-        self.device = device
+    def __init__(self, broker_socket: str, config: GimbalConfig):
+        self.broker_socket = broker_socket
         self.config = config
-        self.fd = -1
+        self.transport: socket.socket | None = None
         self.sequence = 0
 
     def open(self) -> None:
-        self.fd = os.open(self.device, os.O_RDWR | os.O_CLOEXEC)
+        self.transport = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+        self.transport.connect(self.broker_socket)
 
     def close(self) -> None:
-        if self.fd >= 0:
-            os.close(self.fd)
-            self.fd = -1
+        if self.transport is not None:
+            self.transport.close()
+            self.transport = None
 
     def transact(self, command: int, payload: bytes = b"", timeout: float = 5.0) -> Telemetry:
-        if self.fd < 0:
-            raise GimbalError("RPMsg device is not open")
+        if self.transport is None:
+            raise GimbalError("RPMsg broker is not connected")
         self.sequence = (self.sequence + 1) & 0xFF
         frame = encode_frame(command, self.sequence, payload)
-        if os.write(self.fd, frame) != len(frame):
-            raise GimbalError("short RPMsg write")
-        readable, _, _ = select.select([self.fd], [], [], timeout)
+        if self.transport.send(frame) != len(frame):
+            raise GimbalError("short broker write")
+        readable, _, _ = select.select([self.transport], [], [], timeout)
         if not readable:
             raise GimbalError("RPMsg reply timeout")
-        reply_command, reply_sequence, reply_payload = decode_frame(os.read(self.fd, 128))
+        reply_command, reply_sequence, reply_payload = decode_frame(
+            self.transport.recv(128)
+        )
         if reply_command != command or reply_sequence != self.sequence:
             raise GimbalError("unexpected RPMsg reply")
         return Telemetry.parse(reply_payload)
@@ -414,7 +417,7 @@ def receive_json(connection: socket.socket) -> dict[str, Any]:
 
 def serve(args: argparse.Namespace) -> int:
     config = GimbalConfig.load(args.config)
-    gimbal = RpmsgGimbal(args.device, config)
+    gimbal = RpmsgGimbal(args.broker_socket, config)
     gimbal.open()
     service = GimbalService(gimbal, args.limit_margin_deg)
     socket_path = Path(args.socket)
@@ -465,7 +468,7 @@ def serve(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--device", default=DEFAULT_DEVICE)
+    parser.add_argument("--broker-socket", default=DEFAULT_BROKER_SOCKET)
     parser.add_argument("--config", default=DEFAULT_CONFIG)
     parser.add_argument("--socket", default=DEFAULT_SOCKET)
     parser.add_argument("--limit-margin-deg", type=float, default=3.0)

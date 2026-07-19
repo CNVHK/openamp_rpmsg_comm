@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "../src/rpmsg_protocol.h"
+#include "../src/rpmsg_transport.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -312,9 +313,9 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    fd = open(device, O_RDWR | O_CLOEXEC);
+    fd = rpmsg_transport_open(device);
     if (fd < 0) {
-        perror("open rpmsg device (try sudo)");
+        perror("connect rpmsg broker");
         return 1;
     }
     if (drop_sudo_privileges() != 0) {
