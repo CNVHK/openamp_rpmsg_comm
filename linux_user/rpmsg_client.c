@@ -11,7 +11,7 @@
 #include <sys/select.h>
 #include <unistd.h>
 
-#define RPMSG_CLIENT_VERSION "0.19.1-leg-joint-mapping"
+#define RPMSG_CLIENT_VERSION "0.19.2-servo-output-disable"
 #define RAD_PER_DEG 0.017453292519943295f
 
 static int wait_readable(int fd, int timeout_ms)
@@ -128,7 +128,7 @@ static void usage(const char *prog)
     printf("  %s <rpmsg_dev> servo-move <duration_ms> <s0_deg> <s1_deg> <s2_deg> <s3_deg>\n", prog);
     printf("  %s <rpmsg_dev> leg-joints <duration_ms> <right_front_deg> <right_rear_deg> <left_front_deg> <left_rear_deg>\n", prog);
     printf("  %s <rpmsg_dev> servo-status\n", prog);
-    printf("  %s <rpmsg_dev> servo-stop\n", prog);
+    printf("  %s <rpmsg_dev> servo-stop  # cancel motion and disable all servo PWM outputs\n", prog);
     printf("  %s <rpmsg_dev> imuinit\n", prog);
     printf("  %s <rpmsg_dev> imuread\n", prog);
     printf("  %s <rpmsg_dev> imu-attitude\n", prog);

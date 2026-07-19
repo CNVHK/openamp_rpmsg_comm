@@ -100,6 +100,8 @@ void servo_motion_stop(void)
     }
     g_telemetry.remaining_ms = 0U;
     g_telemetry.state = SERVO_MOTION_IDLE;
+    phytium_servo_disable_outputs();
+    update_debug_pulses();
 }
 
 void servo_motion_poll(void)

@@ -8,6 +8,7 @@
 
 static uint64_t g_now;
 static unsigned int g_write_count;
+static unsigned int g_disable_count;
 static PhytiumServoDebugState g_debug;
 
 uint64_t GenericTimerRead(uint32_t timer_id)
@@ -39,6 +40,14 @@ int phytium_servo_set_all_x10(
     return 0;
 }
 
+void phytium_servo_disable_outputs(void)
+{
+    ++g_disable_count;
+    for (uint8_t i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
+        g_debug.pulse_us[i] = 0U;
+    }
+}
+
 static void advance_ms(uint32_t milliseconds)
 {
     g_now += (uint64_t)milliseconds * TEST_TIMER_HZ / 1000U;
@@ -49,6 +58,7 @@ static void reset_fixture(void)
     memset(&g_debug, 0, sizeof(g_debug));
     g_now = 1000U;
     g_write_count = 0U;
+    g_disable_count = 0U;
     for (uint8_t i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
         g_debug.angle_deg[i] = 90U;
         g_debug.angle_x10_deg[i] = 900U;
@@ -99,6 +109,10 @@ static void test_validation_and_stop(void)
     servo_motion_stop();
     assert(servo_motion_get_telemetry()->state == SERVO_MOTION_IDLE);
     assert(servo_motion_get_telemetry()->remaining_ms == 0U);
+    assert(g_disable_count == 1U);
+    for (uint8_t i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
+        assert(servo_motion_get_telemetry()->pulse_us[i] == 0U);
+    }
 }
 
 int main(void)

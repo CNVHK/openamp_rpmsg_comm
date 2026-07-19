@@ -33,6 +33,7 @@ static const ServoPwmMap g_servo_map[PHYTIUM_SERVO_NUM] = {
 
 static FPwmCtrl g_pwm_ctrl[FPWM_NUM];
 static int g_servo_ready = 0;
+static int g_servo_outputs_enabled = 0;
 static uint8_t g_servo_polarity = FPWM_POLARITY_NORMAL;
 static PhytiumServoDebugState g_servo_debug = {
     .init_ret = -99,
@@ -197,6 +198,7 @@ int phytium_servo_init(void)
     }
 
     g_servo_ready = 1;
+    g_servo_outputs_enabled = 1;
     g_servo_debug.init_ret = 0;
     g_servo_debug.last_ret = 0;
     return phytium_servo_set_all(g_servo_debug.angle_deg);
@@ -227,6 +229,18 @@ int phytium_servo_set_angle_x10(uint8_t servo_id, uint16_t angle_x10_deg)
             g_servo_debug.last_ret = -2;
             return -2;
         }
+    }
+
+    if (!g_servo_outputs_enabled) {
+        for (uint8_t i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
+            const ServoPwmMap *enable_map = &g_servo_map[i];
+
+            if (enable_map->enabled) {
+                FPwmEnable(&g_pwm_ctrl[enable_map->pwm_id],
+                           enable_map->channel);
+            }
+        }
+        g_servo_outputs_enabled = 1;
     }
 
     angle_x10_deg = servo_clamp_angle_x10(angle_x10_deg);
@@ -290,4 +304,22 @@ int phytium_servo_set_all_x10(
         }
     }
     return ret;
+}
+
+void phytium_servo_disable_outputs(void)
+{
+    if (g_servo_ready && g_servo_outputs_enabled) {
+        for (uint8_t i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
+            const ServoPwmMap *map = &g_servo_map[i];
+
+            if (map->enabled) {
+                FPwmDisable(&g_pwm_ctrl[map->pwm_id], map->channel);
+            }
+        }
+    }
+    g_servo_outputs_enabled = 0;
+    for (uint8_t i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
+        g_servo_debug.pulse_us[i] = 0U;
+    }
+    g_servo_debug.last_ret = 0;
 }
