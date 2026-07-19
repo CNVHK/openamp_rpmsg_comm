@@ -8,8 +8,8 @@ The first deployment is intentionally conservative:
 
 - absolute yaw and pitch targets only;
 - business workspace limited to +/-10 degrees on each axis;
-- fixed 5 rpm movement speed;
-- configured movement torque (currently 50 percent);
+- configured movement speed (currently 20 rpm);
+- configured movement torque (currently 80 percent);
 - every target requires active state, no fault, complete limits, valid
   feedback, and feedback younger than 500 ms;
 - enable and disable require explicit confirmation;
@@ -77,9 +77,8 @@ to the Linux gimbal daemon and do not change the motor driver's PID settings.
 Use `systemctl daemon-reload` only after changing the systemd unit file, and
 use `reloadrproc` only after installing a new remote-core firmware image.
 
-Current limitation: `set` and `center` still command a fixed movement speed of
-5 rpm. `move_torque_percent` is applied after a daemon restart, but
-`move_speed_rpm` does not yet affect those two commands.
+Both `move_speed_rpm` and `move_torque_percent` apply to `set` and `center`
+after the daemon restarts.
 
 ## Manual acceptance
 

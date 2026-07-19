@@ -77,6 +77,7 @@ class FakeGimbal:
     def __init__(self, telemetry):
         self.telemetry = telemetry
         self.config = type("Config", (), {
+            "move_speed_rpm": 20,
             "move_torque_percent": 50,
             "yaw_min_deg": -37.94,
             "yaw_max_deg": 213.97,
@@ -135,7 +136,7 @@ class ServiceSafetyTests(unittest.TestCase):
             {"command": "set", "yaw_deg": 2, "pitch_deg": -2}
         )
         self.assertTrue(response["ok"])
-        self.assertEqual(fake.targets, [(2.0, -2.0, 5, 50)])
+        self.assertEqual(fake.targets, [(2.0, -2.0, 20, 50)])
 
     def test_workspace_violation_is_rejected(self):
         service = gimbal_daemon.GimbalService(
@@ -150,7 +151,16 @@ class ServiceSafetyTests(unittest.TestCase):
             {"command": "set", "yaw_deg": 180, "pitch_deg": 0}
         )
         self.assertTrue(response["ok"])
-        self.assertEqual(fake.targets, [(180.0, 0.0, 5, 50)])
+        self.assertEqual(fake.targets, [(180.0, 0.0, 20, 50)])
+
+    def test_fault_is_reported_before_inactive_state(self):
+        service = gimbal_daemon.GimbalService(
+            FakeGimbal(self.active_telemetry(state=6, fault=0x80)), 3.0
+        )
+        with self.assertRaisesRegex(
+            gimbal_daemon.GimbalError, "state=6 fault=0x80"
+        ):
+            service.handle({"command": "set", "yaw_deg": 2, "pitch_deg": 0})
 
     def test_stale_feedback_is_rejected(self):
         service = gimbal_daemon.GimbalService(

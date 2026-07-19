@@ -295,10 +295,12 @@ class GimbalService:
         status = self.gimbal.status()
         if status.command_status != STATUS_OK:
             raise GimbalError(f"status rejected: {status.command_status}")
+        if status.fault != 0:
+            raise GimbalError(
+                f"gimbal fault: state={status.state} fault=0x{status.fault:02x}"
+            )
         if status.state != STATE_ACTIVE:
             raise GimbalError(f"gimbal is not active: state={status.state}")
-        if status.fault != 0:
-            raise GimbalError(f"gimbal fault: 0x{status.fault:02x}")
         if status.limits_valid_mask != 0x0F:
             raise GimbalError("gimbal limits are not ready")
         if status.feedback_valid_mask != 0x03:
@@ -374,7 +376,7 @@ class GimbalService:
                     f"pitch=[{pitch_min:.2f}, {pitch_max:.2f}]"
                 )
             telemetry = self.gimbal.set_target(
-                yaw, pitch, speed_rpm=5,
+                yaw, pitch, speed_rpm=self.gimbal.config.move_speed_rpm,
                 torque_percent=self.gimbal.config.move_torque_percent,
             )
             if telemetry.command_status == STATUS_OK:
