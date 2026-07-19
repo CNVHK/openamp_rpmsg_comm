@@ -3,7 +3,7 @@ CFLAGS ?= -std=c99 -Wall -Wextra -I./src
 PYTHON ?= python3
 BUILD_DIR := build
 
-.PHONY: all test client logger gimbal clean
+.PHONY: all test test-python client logger gimbal install-gimbal-daemon clean
 
 all: test client logger gimbal
 
@@ -12,13 +12,22 @@ $(BUILD_DIR):
 
 test: $(BUILD_DIR) $(BUILD_DIR)/test_protocol $(BUILD_DIR)/test_motor_can \
 	$(BUILD_DIR)/test_motor_balance_protocol $(BUILD_DIR)/test_lqr_controller \
-	$(BUILD_DIR)/test_gimbal_controller $(BUILD_DIR)/test_servo_motion_controller
+	$(BUILD_DIR)/test_gimbal_controller $(BUILD_DIR)/test_servo_motion_controller test-python
+
+test-python:
+	$(PYTHON) -m unittest tests/test_gimbal_daemon.py
 
 client: $(BUILD_DIR) $(BUILD_DIR)/rpmsg_client
 
 logger: $(BUILD_DIR) $(BUILD_DIR)/balance_logger
 
 gimbal: $(BUILD_DIR) $(BUILD_DIR)/gimbal_test
+
+install-gimbal-daemon:
+	install -d -m 0755 /usr/local/libexec
+	install -m 0755 linux_user/gimbal_daemon.py /usr/local/libexec/gimbal-daemon
+	install -m 0755 linux_user/gimbalctl.py /usr/local/bin/gimbalctl
+	install -m 0644 integration/systemd/gimbal-daemon.service /etc/systemd/system/gimbal-daemon.service
 
 $(BUILD_DIR)/test_protocol: src/rpmsg_protocol.c src/rpmsg_protocol.h tests/test_protocol.c
 	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@
