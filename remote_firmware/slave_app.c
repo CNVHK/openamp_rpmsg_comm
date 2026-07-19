@@ -84,32 +84,45 @@ static void write_be_u16(uint8_t *p, uint16_t value)
     p[1] = (uint8_t)(value & 0xff);
 }
 
-static void handle_servo_set4(const uint8_t *payload, uint8_t length)
+static int handle_servo_adopt4(const uint8_t *payload, uint8_t length)
 {
     uint16_t angles[PHYTIUM_SERVO_NUM];
 
     if (length < PHYTIUM_SERVO_NUM * 2U ||
         balance_control_get_telemetry()->state != BALANCE_STATE_DISABLED) {
-        return;
+        return length < PHYTIUM_SERVO_NUM * 2U ?
+            SERVO_MOTION_INVALID : SERVO_MOTION_BALANCE_ACTIVE;
     }
 
     for (int i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
         angles[i] = read_be_u16(&payload[i * 2]);
     }
 
-    phytium_servo_set_all(angles);
-    (void)servo_motion_init();
+    return servo_motion_adopt(angles);
+}
+
+static void handle_servo_set4(const uint8_t *payload, uint8_t length)
+{
+    uint8_t payload_x10[PHYTIUM_SERVO_NUM * 2U];
+
+    if (length < PHYTIUM_SERVO_NUM * 2U) {
+        return;
+    }
+    for (uint8_t i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
+        write_be_u16(&payload_x10[i * 2U],
+                     (uint16_t)(read_be_u16(&payload[i * 2U]) * 10U));
+    }
+    (void)handle_servo_adopt4(payload_x10, sizeof(payload_x10));
 }
 
 static void handle_servo_center(void)
 {
-    const uint16_t angles[PHYTIUM_SERVO_NUM] = {90, 90, 90, 90};
+    const uint16_t angles[PHYTIUM_SERVO_NUM] = {900, 900, 900, 900};
 
     if (balance_control_get_telemetry()->state != BALANCE_STATE_DISABLED) {
         return;
     }
-    phytium_servo_set_all(angles);
-    (void)servo_motion_init();
+    (void)servo_motion_adopt(angles);
 }
 
 static void handle_servo_polarity(const uint8_t *payload, uint8_t length)
@@ -120,9 +133,8 @@ static void handle_servo_polarity(const uint8_t *payload, uint8_t length)
     }
 
     phytium_servo_set_polarity(payload[0]);
-    const uint16_t angles[PHYTIUM_SERVO_NUM] = {90, 90, 90, 90};
-    phytium_servo_set_all(angles);
-    (void)servo_motion_init();
+    const uint16_t angles[PHYTIUM_SERVO_NUM] = {900, 900, 900, 900};
+    (void)servo_motion_adopt(angles);
 }
 
 static int handle_servo_move4(const uint8_t *payload, uint8_t length)
@@ -139,6 +151,29 @@ static int handle_servo_move4(const uint8_t *payload, uint8_t length)
         target[i] = read_be_u16(&payload[i * 2U]);
     }
     return servo_motion_start(target, read_be_u16(&payload[8]));
+}
+
+static int leg_raw_angles_are_safe(const uint8_t *payload, uint8_t length)
+{
+    uint16_t raw[PHYTIUM_SERVO_NUM];
+
+    if (payload == NULL || length < PHYTIUM_SERVO_NUM * 2U) {
+        return 0;
+    }
+    for (uint8_t i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
+        raw[i] = read_be_u16(&payload[i * 2U]);
+    }
+    return raw[0] <= 450U && raw[2] <= 450U &&
+           raw[1] >= 1350U && raw[1] <= 1800U &&
+           raw[3] >= 1350U && raw[3] <= 1800U;
+}
+
+static int handle_leg_move4(const uint8_t *payload, uint8_t length)
+{
+    if (length < 10U || !leg_raw_angles_are_safe(payload, length)) {
+        return SERVO_MOTION_INVALID;
+    }
+    return handle_servo_move4(payload, length);
 }
 
 static void handle_imu_init(void)
@@ -917,6 +952,21 @@ size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply,
         servo_motion_stop();
         return build_servo_motion_ack(frame.type, frame.seq, SERVO_MOTION_OK,
                                       reply, reply_size);
+    case CMD_SERVO_ADOPT4: {
+        if (!leg_raw_angles_are_safe(frame.payload, frame.length)) {
+            return build_servo_motion_ack(frame.type, frame.seq,
+                                          SERVO_MOTION_INVALID,
+                                          reply, reply_size);
+        }
+        int status = handle_servo_adopt4(frame.payload, frame.length);
+        return build_servo_motion_ack(frame.type, frame.seq, (uint8_t)status,
+                                      reply, reply_size);
+    }
+    case CMD_LEG_MOVE4: {
+        int status = handle_leg_move4(frame.payload, frame.length);
+        return build_servo_motion_ack(frame.type, frame.seq, (uint8_t)status,
+                                      reply, reply_size);
+    }
     case CMD_IMU_INIT:
         handle_imu_init();
         return build_ack(frame.seq, reply, reply_size);

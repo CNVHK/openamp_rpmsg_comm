@@ -43,7 +43,7 @@ static PhytiumServoDebugState g_servo_debug = {
     .last_channel = 0xff,
     .angle_deg = {90, 90, 90, 90},
     .angle_x10_deg = {900, 900, 900, 900},
-    .pulse_us = {1500, 1500, 1500, 1500},
+    .pulse_us = {0, 0, 0, 0},
 };
 
 static uint16_t servo_clamp_angle(uint16_t angle_deg)
@@ -194,14 +194,16 @@ int phytium_servo_init(void)
                    (unsigned)i, (unsigned)map->pwm_id, (unsigned)map->channel, ret);
             return -4;
         }
-        FPwmEnable(&g_pwm_ctrl[map->pwm_id], map->channel);
     }
 
     g_servo_ready = 1;
-    g_servo_outputs_enabled = 1;
+    g_servo_outputs_enabled = 0;
     g_servo_debug.init_ret = 0;
     g_servo_debug.last_ret = 0;
-    return phytium_servo_set_all(g_servo_debug.angle_deg);
+    for (uint8_t i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
+        g_servo_debug.pulse_us[i] = 0U;
+    }
+    return 0;
 }
 
 int phytium_servo_set_angle(uint8_t servo_id, uint16_t angle_deg)
@@ -232,15 +234,8 @@ int phytium_servo_set_angle_x10(uint8_t servo_id, uint16_t angle_x10_deg)
     }
 
     if (!g_servo_outputs_enabled) {
-        for (uint8_t i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
-            const ServoPwmMap *enable_map = &g_servo_map[i];
-
-            if (enable_map->enabled) {
-                FPwmEnable(&g_pwm_ctrl[enable_map->pwm_id],
-                           enable_map->channel);
-            }
-        }
-        g_servo_outputs_enabled = 1;
+        g_servo_debug.last_ret = -4;
+        return -4;
     }
 
     angle_x10_deg = servo_clamp_angle_x10(angle_x10_deg);
@@ -282,20 +277,57 @@ int phytium_servo_set_angle_x10(uint8_t servo_id, uint16_t angle_x10_deg)
 
 int phytium_servo_set_all(const uint16_t angle_deg[PHYTIUM_SERVO_NUM])
 {
-    int ret = 0;
+    uint16_t angle_x10_deg[PHYTIUM_SERVO_NUM];
+
     for (uint8_t i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
-        int one_ret = phytium_servo_set_angle(i, angle_deg[i]);
-        if (one_ret != 0) {
-            ret = one_ret;
-        }
+        angle_x10_deg[i] = (uint16_t)(servo_clamp_angle(angle_deg[i]) * 10U);
     }
-    return ret;
+    return phytium_servo_set_all_x10(angle_x10_deg);
 }
 
 int phytium_servo_set_all_x10(
     const uint16_t angle_x10_deg[PHYTIUM_SERVO_NUM])
 {
     int ret = 0;
+
+    if (angle_x10_deg == NULL) {
+        return -1;
+    }
+    if (!g_servo_ready && phytium_servo_init() != 0) {
+        return -2;
+    }
+    if (!g_servo_outputs_enabled) {
+        /* Program every disabled channel before enabling any channel. This
+         * prevents the linkage from briefly seeing the 90-degree defaults. */
+        for (uint8_t i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
+            const ServoPwmMap *map = &g_servo_map[i];
+            uint16_t angle = servo_clamp_angle_x10(angle_x10_deg[i]);
+            uint16_t pulse_us = servo_angle_x10_to_pulse_us(angle);
+            FError one_ret = FPWM_SUCCESS;
+
+            if (map->enabled) {
+                one_ret = FPwmPulseSet(&g_pwm_ctrl[map->pwm_id], map->channel,
+                                       servo_pulse_to_ccr_us(pulse_us));
+            }
+            if (one_ret != FPWM_SUCCESS) {
+                g_servo_debug.last_ret = -3;
+                return -3;
+            }
+            g_servo_debug.angle_deg[i] = angle / 10U;
+            g_servo_debug.angle_x10_deg[i] = angle;
+            g_servo_debug.pulse_us[i] = pulse_us;
+        }
+        for (uint8_t i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
+            const ServoPwmMap *map = &g_servo_map[i];
+
+            if (map->enabled) {
+                FPwmEnable(&g_pwm_ctrl[map->pwm_id], map->channel);
+            }
+        }
+        g_servo_outputs_enabled = 1;
+        g_servo_debug.last_ret = 0;
+        return 0;
+    }
 
     for (uint8_t i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
         int one_ret = phytium_servo_set_angle_x10(i, angle_x10_deg[i]);

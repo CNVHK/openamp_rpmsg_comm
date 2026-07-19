@@ -11,7 +11,7 @@
 #include <sys/select.h>
 #include <unistd.h>
 
-#define RPMSG_CLIENT_VERSION "0.19.2-servo-output-disable"
+#define RPMSG_CLIENT_VERSION "0.20.0-servo-safe-adopt"
 #define RAD_PER_DEG 0.017453292519943295f
 
 static int wait_readable(int fd, int timeout_ms)
@@ -122,11 +122,12 @@ static void usage(const char *prog)
     printf("  %s <rpmsg_dev> torque-test <motor_id> <torque_nm> [duration_ms]\n", prog);
     printf("  %s <rpmsg_dev> motor-fault <motor_id>\n", prog);
     printf("  %s <rpmsg_dev> motor-speed-diag <motor_id> <torque_nm> [duration_ms]\n", prog);
-    printf("  %s <rpmsg_dev> servo <s0_deg> <s1_deg> <s2_deg> <s3_deg>\n", prog);
-    printf("  %s <rpmsg_dev> servopol <0..7>\n", prog);
-    printf("  %s <rpmsg_dev> servocenter\n", prog);
+    printf("  %s <rpmsg_dev> servo <s0_deg> <s1_deg> <s2_deg> <s3_deg> CONFIRM\n", prog);
+    printf("  %s <rpmsg_dev> servopol <0..7> CONFIRM\n", prog);
+    printf("  %s <rpmsg_dev> servocenter CONFIRM\n", prog);
     printf("  %s <rpmsg_dev> servo-move <duration_ms> <s0_deg> <s1_deg> <s2_deg> <s3_deg>\n", prog);
     printf("  %s <rpmsg_dev> leg-joints <duration_ms> <right_front_deg> <right_rear_deg> <left_front_deg> <left_rear_deg>\n", prog);
+    printf("  %s <rpmsg_dev> leg-adopt <right_front_deg> <right_rear_deg> <left_front_deg> <left_rear_deg> CONFIRM\n", prog);
     printf("  %s <rpmsg_dev> servo-status\n", prog);
     printf("  %s <rpmsg_dev> servo-stop  # cancel motion and disable all servo PWM outputs\n", prog);
     printf("  %s <rpmsg_dev> imuinit\n", prog);
@@ -150,11 +151,12 @@ static void usage(const char *prog)
     printf("  %s /dev/rpmsg0 heartbeat\n", prog);
     printf("  %s /dev/rpmsg0 init 1\n", prog);
     printf("  %s /dev/rpmsg0 test\n", prog);
-    printf("  %s /dev/rpmsg0 servo 90 90 90 90\n", prog);
-    printf("  %s /dev/rpmsg0 servopol 4\n", prog);
-    printf("  %s /dev/rpmsg0 servocenter\n", prog);
+    printf("  %s /dev/rpmsg0 servo 90 90 90 90 CONFIRM\n", prog);
+    printf("  %s /dev/rpmsg0 servopol 4 CONFIRM\n", prog);
+    printf("  %s /dev/rpmsg0 servocenter CONFIRM\n", prog);
     printf("  %s /dev/rpmsg0 servo-move 3000 85 95 85 95\n", prog);
-    printf("  %s /dev/rpmsg0 leg-joints 3000 45 45 45 45\n", prog);
+    printf("  %s /dev/rpmsg0 leg-adopt 45 45 45 45 CONFIRM\n", prog);
+    printf("  %s /dev/rpmsg0 leg-joints 3000 43 43 43 43\n", prog);
     printf("  %s /dev/rpmsg0 servo-status\n", prog);
     printf("  %s /dev/rpmsg0 servo-stop\n", prog);
     printf("  %s /dev/rpmsg0 imuinit\n", prog);
@@ -323,7 +325,7 @@ static int build_command(int argc, char **argv, uint8_t *type, uint8_t *payload,
     }
 
     if (strcmp(cmd, "servo") == 0) {
-        if (argc < 7) return -1;
+        if (argc != 8 || strcmp(argv[7], "CONFIRM") != 0) return -1;
         *type = CMD_SERVO_SET4;
         for (int i = 0; i < 4; ++i) {
             unsigned long angle = strtoul(argv[3 + i], NULL, 0);
@@ -335,18 +337,59 @@ static int build_command(int argc, char **argv, uint8_t *type, uint8_t *payload,
     }
 
     if (strcmp(cmd, "servocenter") == 0) {
+        if (argc != 4 || strcmp(argv[3], "CONFIRM") != 0) return -1;
         *type = CMD_SERVO_CENTER;
         *payload_len = 0;
         return 0;
     }
 
     if (strcmp(cmd, "servopol") == 0) {
-        if (argc < 4) {
+        if (argc != 5 || strcmp(argv[4], "CONFIRM") != 0) {
             return -1;
         }
         *type = CMD_SERVO_POLARITY;
         payload[0] = (uint8_t)strtoul(argv[3], NULL, 0);
         *payload_len = 1;
+        return 0;
+    }
+
+    if (strcmp(cmd, "leg-adopt") == 0) {
+        char *end = NULL;
+        uint16_t angle_x10[LEG_JOINT_COUNT];
+        uint16_t raw_x10[LEG_JOINT_COUNT];
+
+        if (argc != 8 || strcmp(argv[7], "CONFIRM") != 0) {
+            return -1;
+        }
+        for (uint8_t i = 0; i < LEG_JOINT_COUNT; ++i) {
+            float angle;
+
+            end = NULL;
+            angle = strtof(argv[3 + i], &end);
+            if (end == argv[3 + i] || *end != '\0' || !isfinite(angle) ||
+                angle < 0.0f || angle > 45.0f) {
+                return -1;
+            }
+            angle_x10[i] = (uint16_t)(angle * 10.0f + 0.5f);
+        }
+        if (leg_effective_to_servo_raw_x10(angle_x10, raw_x10) != 0) {
+            return -1;
+        }
+        printf("WARNING: support the robot and manually place the legs at the stated pose.\n");
+        printf("adopt effective RF,RR,LF,LR=%.1f,%.1f,%.1f,%.1f deg -> raw servo 1,2,3,4=%.1f,%.1f,%.1f,%.1f deg\n",
+               (double)angle_x10[0] / 10.0,
+               (double)angle_x10[1] / 10.0,
+               (double)angle_x10[2] / 10.0,
+               (double)angle_x10[3] / 10.0,
+               (double)raw_x10[0] / 10.0,
+               (double)raw_x10[1] / 10.0,
+               (double)raw_x10[2] / 10.0,
+               (double)raw_x10[3] / 10.0);
+        for (uint8_t i = 0; i < LEG_JOINT_COUNT; ++i) {
+            put_be_u16(&payload[i * 2], raw_x10[i]);
+        }
+        *type = CMD_SERVO_ADOPT4;
+        *payload_len = 8U;
         return 0;
     }
 
@@ -367,8 +410,10 @@ static int build_command(int argc, char **argv, uint8_t *type, uint8_t *payload,
 
             end = NULL;
             angle = strtof(argv[4 + i], &end);
+            float max_angle = strcmp(cmd, "leg-joints") == 0 ? 45.0f : 180.0f;
+
             if (end == argv[4 + i] || *end != '\0' || !isfinite(angle) ||
-                angle < 0.0f || angle > 180.0f) {
+                angle < 0.0f || angle > max_angle) {
                 return -1;
             }
             angle_x10[i] = (uint16_t)(angle * 10.0f + 0.5f);
@@ -377,6 +422,15 @@ static int build_command(int argc, char **argv, uint8_t *type, uint8_t *payload,
             if (leg_effective_to_servo_raw_x10(angle_x10, raw_x10) != 0) {
                 return -1;
             }
+            printf("leg target effective RF,RR,LF,LR=%.1f,%.1f,%.1f,%.1f deg -> raw servo 1,2,3,4=%.1f,%.1f,%.1f,%.1f deg\n",
+                   (double)angle_x10[0] / 10.0,
+                   (double)angle_x10[1] / 10.0,
+                   (double)angle_x10[2] / 10.0,
+                   (double)angle_x10[3] / 10.0,
+                   (double)raw_x10[0] / 10.0,
+                   (double)raw_x10[1] / 10.0,
+                   (double)raw_x10[2] / 10.0,
+                   (double)raw_x10[3] / 10.0);
         } else {
             memcpy(raw_x10, angle_x10, sizeof(raw_x10));
         }
@@ -384,7 +438,8 @@ static int build_command(int argc, char **argv, uint8_t *type, uint8_t *payload,
             put_be_u16(&payload[i * 2], raw_x10[i]);
         }
         put_be_u16(&payload[8], (uint16_t)duration_ms);
-        *type = CMD_SERVO_MOVE4;
+        *type = strcmp(cmd, "leg-joints") == 0 ?
+            CMD_LEG_MOVE4 : CMD_SERVO_MOVE4;
         *payload_len = 10U;
         return 0;
     }
@@ -692,12 +747,14 @@ int main(int argc, char **argv)
         close(fd);
         return status == 0U ? 0 : 4;
     }
-    if (type >= CMD_SERVO_MOVE4 && type <= CMD_SERVO_STOP) {
+    if ((type >= CMD_SERVO_MOVE4 && type <= CMD_SERVO_STOP) ||
+        type == CMD_SERVO_ADOPT4 || type == CMD_LEG_MOVE4) {
         static const char *const status_names[] = {
-            "ok", "invalid", "busy", "balance-active", "hardware-error"
+            "ok", "invalid", "busy", "balance-active", "hardware-error",
+            "not-armed"
         };
         static const char *const state_names[] = {
-            "idle", "moving", "fault"
+            "idle", "moving", "fault", "unarmed"
         };
         uint8_t status;
         uint8_t state;
@@ -716,8 +773,8 @@ int main(int argc, char **argv)
         status = ack.payload[1];
         state = ack.payload[2];
         printf("servo motion: status=%s(%u) state=%s(%u) last_error=%d remaining=%u ms\n",
-               status < 5U ? status_names[status] : "unknown", status,
-               state < 3U ? state_names[state] : "unknown", state,
+               status < 6U ? status_names[status] : "unknown", status,
+               state < 4U ? state_names[state] : "unknown", state,
                (int8_t)ack.payload[3], read_be_u32(&ack.payload[4]));
         printf("commanded angle (no position feedback): current=%.1f,%.1f,%.1f,%.1f deg target=%.1f,%.1f,%.1f,%.1f deg\n",
                (double)read_be_u16(&ack.payload[8]) / 10.0,

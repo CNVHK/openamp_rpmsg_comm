@@ -37,7 +37,7 @@ reloadrproc
 rprun heartbeat
 ```
 
-客户端版本应为 `0.19.2-servo-output-disable` 或更高。
+客户端版本应为 `0.20.0-servo-safe-adopt` 或更高。
 
 ## 3. 单独验证 IMU Roll
 
@@ -112,9 +112,14 @@ rprun servo-move 2000 90 90 90 90
 
 ```bash
 rprun balance-disable
-rprun leg-joints 3000 45 45 45 45
+rprun servo-status
+rprun leg-adopt 45 45 45 45 CONFIRM
 rprun servo-status
 ```
+
+`leg-adopt` 不是运动命令。执行前必须支撑机器人，并人工确认四腿已经处于所填姿态；它会
+把该姿态作为无反馈轨迹控制器的真实起点并立即输出对应 PWM。上电后或 `servo-stop` 后若
+没有执行接管，`leg-joints` 必须返回 `not-armed`，这是防止固件把默认 90 度误当实际姿态。
 
 装上连杆后优先使用 `leg-joints`。`servo-move` 是底层原始舵机命令，只用于连杆断开时
 逐路诊断，不应用它直接做并联腿同步动作。
@@ -124,9 +129,14 @@ rprun servo-status
 ```bash
 rprun leg-joints 3000 43 43 43 43
 rprun leg-joints 3000 45 45 45 45
-rprun leg-joints 3000 47 47 47 47
-rprun leg-joints 3000 45 45 45 45
 ```
+
+当前实机已知有效范围为 `0..45 deg`，客户端和从核会同时拒绝任何 `leg-*` 超界值。
+不得再测试 47 度。四路各自更精确的安装零偏和机械下限尚未标定，因此第一阶段只允许
+从人工确认的 45 度姿态小幅减小到 43 度，再返回 45 度。
+
+结束测试后执行 `rprun servo-stop` 会真正关闭四路 PWM，同时控制器回到 `unarmed`；下次
+运动必须重新人工确认并执行 `leg-adopt`。
 
 持续观察命令状态：
 

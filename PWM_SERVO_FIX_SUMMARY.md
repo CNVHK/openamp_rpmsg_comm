@@ -5,9 +5,9 @@
 在飞腾派 OpenAMP 从核固件中加入 PWM 舵机控制后，Linux 侧通过 `rpmsg_client` 下发舵机控制命令：
 
 ```bash
-rprun servocenter
-rprun servo 0 90 90 90
-rprun servo 180 90 90 90
+rprun servocenter CONFIRM
+rprun servo 0 90 90 90 CONFIRM
+rprun servo 180 90 90 90 CONFIRM
 ```
 
 从 Linux 端回传结果看，OpenAMP 通信和从核 PWM API 调用均正常：
@@ -112,10 +112,10 @@ PWM 参数为：
 测试命令：
 
 ```bash
-rprun servocenter
-rprun servo 0 90 90 90
-rprun servo 180 90 90 90
-rprun servo 90 90 90 90
+rprun servocenter CONFIRM
+rprun servo 0 90 90 90 CONFIRM
+rprun servo 180 90 90 90 CONFIRM
+rprun servo 90 90 90 90 CONFIRM
 ```
 
 Linux 端回传：

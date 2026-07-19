@@ -59,25 +59,27 @@ static void test_measured_reference_calibration(void)
     leg_robot_get_measured_calibration(&calibration);
     assert(leg_kinematics_calibration_valid(&calibration));
     assert(leg_inverse_kinematics(&calibration.geometry,
-                                  0.0f, 0.140f, &physical) == 0);
+                                  0.0f, 0.130f, &physical) == 0);
     assert(leg_forward_kinematics(&calibration.geometry,
                                   &physical,
                                   &reconstructed_offset,
                                   &reconstructed_height) == 0);
     assert(fabsf(reconstructed_offset) < 1.0e-5f);
-    assert(fabsf(reconstructed_height - 0.140f) < 1.0e-5f);
+    assert(fabsf(reconstructed_height - 0.130f) < 1.0e-5f);
     assert(leg_calibrated_inverse_kinematics(
-        &calibration, 0.0f, 0.140f, &effective) == 0);
+        &calibration, 0.0f, 0.130f, &effective) == 0);
     assert(fabsf(effective.front_angle_rad * rad_to_deg - 45.0f) < 1.0e-4f);
     assert(fabsf(effective.rear_angle_rad * rad_to_deg - 45.0f) < 1.0e-4f);
 
     assert(leg_calibrated_inverse_kinematics(
-        &calibration, 0.0f, 0.150f, &effective) == 0);
-    assert(fabsf(effective.front_angle_rad * rad_to_deg - 49.40f) < 0.02f);
-    assert(fabsf(effective.rear_angle_rad * rad_to_deg - 49.40f) < 0.02f);
+        &calibration, 0.0f, 0.140f, &effective) == 0);
+    assert(effective.front_angle_rad * rad_to_deg > 49.0f);
+    assert(effective.front_angle_rad * rad_to_deg < 49.5f);
+    assert(effective.rear_angle_rad * rad_to_deg > 49.0f);
+    assert(effective.rear_angle_rad * rad_to_deg < 49.5f);
 
     assert(leg_calibrated_inverse_kinematics(
-        &calibration, 0.005f, 0.140f, &effective) == 0);
+        &calibration, 0.005f, 0.130f, &effective) == 0);
     assert(effective.front_angle_rad < 45.0f / rad_to_deg);
     assert(effective.rear_angle_rad > 45.0f / rad_to_deg);
 

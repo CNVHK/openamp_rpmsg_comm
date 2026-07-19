@@ -52,8 +52,40 @@ int servo_motion_init(void)
         g_telemetry.target_angle_x10_deg[i] = debug->angle_x10_deg[i];
     }
     update_debug_pulses();
-    g_telemetry.state = SERVO_MOTION_IDLE;
+    /* PWM servos have no position feedback. Debug values after reset are not
+     * proof of the physical pose, so motion must remain blocked until an
+     * operator explicitly adopts a known pose. */
+    g_telemetry.state = SERVO_MOTION_UNARMED;
     return 0;
+}
+
+int servo_motion_adopt(
+    const uint16_t current_angle_x10_deg[PHYTIUM_SERVO_NUM])
+{
+    if (current_angle_x10_deg == NULL ||
+        g_telemetry.state == SERVO_MOTION_MOVING) {
+        return current_angle_x10_deg == NULL ?
+            SERVO_MOTION_INVALID : SERVO_MOTION_BUSY;
+    }
+    for (uint8_t i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
+        if (current_angle_x10_deg[i] > SERVO_MOTION_MAX_ANGLE_X10_DEG) {
+            return SERVO_MOTION_INVALID;
+        }
+    }
+    if (phytium_servo_set_all_x10(current_angle_x10_deg) != 0) {
+        g_telemetry.state = SERVO_MOTION_FAULT;
+        g_telemetry.last_error = -2;
+        return SERVO_MOTION_HARDWARE_ERROR;
+    }
+    for (uint8_t i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
+        g_telemetry.current_angle_x10_deg[i] = current_angle_x10_deg[i];
+        g_telemetry.target_angle_x10_deg[i] = current_angle_x10_deg[i];
+    }
+    g_telemetry.remaining_ms = 0U;
+    g_telemetry.last_error = 0;
+    g_telemetry.state = SERVO_MOTION_IDLE;
+    update_debug_pulses();
+    return SERVO_MOTION_OK;
 }
 
 int servo_motion_start(
@@ -74,6 +106,9 @@ int servo_motion_start(
         if (target_angle_x10_deg[i] > SERVO_MOTION_MAX_ANGLE_X10_DEG) {
             return SERVO_MOTION_INVALID;
         }
+    }
+    if (g_telemetry.state != SERVO_MOTION_IDLE) {
+        return SERVO_MOTION_NOT_ARMED;
     }
 
     now = GenericTimerRead(GENERIC_TIMER_ID0);
@@ -99,7 +134,7 @@ void servo_motion_stop(void)
         }
     }
     g_telemetry.remaining_ms = 0U;
-    g_telemetry.state = SERVO_MOTION_IDLE;
+    g_telemetry.state = SERVO_MOTION_UNARMED;
     phytium_servo_disable_outputs();
     update_debug_pulses();
 }

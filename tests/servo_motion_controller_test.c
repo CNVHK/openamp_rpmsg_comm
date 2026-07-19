@@ -69,14 +69,20 @@ static void reset_fixture(void)
 
 static void test_synchronized_interpolation(void)
 {
+    const uint16_t adopted[PHYTIUM_SERVO_NUM] = {900U, 900U, 900U, 900U};
     const uint16_t target[PHYTIUM_SERVO_NUM] = {1000U, 800U, 1100U, 700U};
     const ServoMotionTelemetry *telemetry;
 
     reset_fixture();
+    assert(servo_motion_get_telemetry()->state == SERVO_MOTION_UNARMED);
+    assert(servo_motion_start(target, 1000U) == SERVO_MOTION_NOT_ARMED);
+    assert(g_write_count == 0U);
+    assert(servo_motion_adopt(adopted) == SERVO_MOTION_OK);
+    assert(g_write_count == 1U);
     assert(servo_motion_start(target, 1000U) == SERVO_MOTION_OK);
     assert(servo_motion_start(target, 1000U) == SERVO_MOTION_BUSY);
     servo_motion_poll();
-    assert(g_write_count == 1U);
+    assert(g_write_count == 2U);
 
     advance_ms(500U);
     servo_motion_poll();
@@ -105,10 +111,13 @@ static void test_validation_and_stop(void)
     reset_fixture();
     assert(servo_motion_start(valid, 99U) == SERVO_MOTION_INVALID);
     assert(servo_motion_start(invalid, 1000U) == SERVO_MOTION_INVALID);
+    assert(servo_motion_start(valid, 1000U) == SERVO_MOTION_NOT_ARMED);
+    assert(servo_motion_adopt(valid) == SERVO_MOTION_OK);
     assert(servo_motion_start(valid, 1000U) == SERVO_MOTION_OK);
     servo_motion_stop();
-    assert(servo_motion_get_telemetry()->state == SERVO_MOTION_IDLE);
+    assert(servo_motion_get_telemetry()->state == SERVO_MOTION_UNARMED);
     assert(servo_motion_get_telemetry()->remaining_ms == 0U);
+    assert(servo_motion_start(valid, 1000U) == SERVO_MOTION_NOT_ARMED);
     assert(g_disable_count == 1U);
     for (uint8_t i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
         assert(servo_motion_get_telemetry()->pulse_us[i] == 0U);
