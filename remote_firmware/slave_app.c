@@ -17,7 +17,9 @@
 #include "phytium_bmi088_port.h"
 #include "phytium_can_port.h"
 #include "phytium_servo_port.h"
+#include "servo_motion_controller.h"
 #include "fgeneric_timer.h"
+#include "fparameters.h"
 #include "fsleep.h"
 #include <math.h>
 #include <stdint.h>
@@ -86,7 +88,8 @@ static void handle_servo_set4(const uint8_t *payload, uint8_t length)
 {
     uint16_t angles[PHYTIUM_SERVO_NUM];
 
-    if (length < PHYTIUM_SERVO_NUM * 2U) {
+    if (length < PHYTIUM_SERVO_NUM * 2U ||
+        balance_control_get_telemetry()->state != BALANCE_STATE_DISABLED) {
         return;
     }
 
@@ -95,23 +98,47 @@ static void handle_servo_set4(const uint8_t *payload, uint8_t length)
     }
 
     phytium_servo_set_all(angles);
+    (void)servo_motion_init();
 }
 
 static void handle_servo_center(void)
 {
     const uint16_t angles[PHYTIUM_SERVO_NUM] = {90, 90, 90, 90};
+
+    if (balance_control_get_telemetry()->state != BALANCE_STATE_DISABLED) {
+        return;
+    }
     phytium_servo_set_all(angles);
+    (void)servo_motion_init();
 }
 
 static void handle_servo_polarity(const uint8_t *payload, uint8_t length)
 {
-    if (length < 1U) {
+    if (length < 1U ||
+        balance_control_get_telemetry()->state != BALANCE_STATE_DISABLED) {
         return;
     }
 
     phytium_servo_set_polarity(payload[0]);
     const uint16_t angles[PHYTIUM_SERVO_NUM] = {90, 90, 90, 90};
     phytium_servo_set_all(angles);
+    (void)servo_motion_init();
+}
+
+static int handle_servo_move4(const uint8_t *payload, uint8_t length)
+{
+    uint16_t target[PHYTIUM_SERVO_NUM];
+
+    if (length < 10U) {
+        return SERVO_MOTION_INVALID;
+    }
+    if (balance_control_get_telemetry()->state != BALANCE_STATE_DISABLED) {
+        return SERVO_MOTION_BALANCE_ACTIVE;
+    }
+    for (uint8_t i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
+        target[i] = read_be_u16(&payload[i * 2U]);
+    }
+    return servo_motion_start(target, read_be_u16(&payload[8]));
 }
 
 static void handle_imu_init(void)
@@ -383,6 +410,69 @@ static size_t build_balance_config_ack(uint8_t type, uint8_t seq,
                  float_to_i32(config.pitch_rate_filter_hz, 1000000.0f));
     write_be_i32(&payload[40],
                  float_to_i32(config.torque_limit_nm, 1000000.0f));
+    return rpmsg_encode(type, seq, payload, sizeof(payload), out, out_size);
+}
+
+static size_t build_servo_motion_ack(uint8_t type, uint8_t seq,
+                                     uint8_t status, uint8_t *out,
+                                     size_t out_size)
+{
+    const ServoMotionTelemetry *telemetry = servo_motion_get_telemetry();
+    uint8_t payload[SERVO_MOTION_TELEMETRY_PAYLOAD_SIZE];
+
+    memset(payload, 0, sizeof(payload));
+    payload[0] = SERVO_MOTION_TELEMETRY_VERSION;
+    payload[1] = status;
+    payload[2] = telemetry->state;
+    payload[3] = (uint8_t)telemetry->last_error;
+    write_be_u32(&payload[4], telemetry->remaining_ms);
+    for (uint8_t i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
+        write_be_u16(&payload[8 + i * 2U],
+                     telemetry->current_angle_x10_deg[i]);
+        write_be_u16(&payload[16 + i * 2U],
+                     telemetry->target_angle_x10_deg[i]);
+        write_be_u16(&payload[24 + i * 2U], telemetry->pulse_us[i]);
+    }
+    return rpmsg_encode(type, seq, payload, sizeof(payload), out, out_size);
+}
+
+static size_t build_imu_telemetry_ack(uint8_t type, uint8_t seq,
+                                      uint8_t command_status, uint8_t *out,
+                                      size_t out_size)
+{
+    const PhytiumBmi088DebugState *debug = phytium_bmi088_get_debug_state();
+    PhytiumBmi088Sample sample;
+    uint8_t payload[IMU_TELEMETRY_PAYLOAD_SIZE];
+    uint64_t frequency = GenericTimerFrequecy();
+    uint8_t status = 0U;
+    uint32_t age_ms = UINT32_MAX;
+
+    memset(payload, 0, sizeof(payload));
+    memset(&sample, 0, sizeof(sample));
+    if (phytium_bmi088_get_sample(&sample) != 0 || !sample.valid) {
+        status = 1U;
+    } else if (frequency != 0U) {
+        uint64_t now = GenericTimerRead(GENERIC_TIMER_ID0);
+        age_ms = (uint32_t)(((now - sample.update_tick) * 1000U) / frequency);
+    }
+    payload[0] = IMU_TELEMETRY_VERSION;
+    payload[1] = command_status == UINT8_MAX ? status : command_status;
+    payload[2] = sample.valid;
+    payload[3] = sample.calibrated;
+    write_be_i32(&payload[4], float_to_i32(sample.roll_rad, 1000000.0f));
+    write_be_i32(&payload[8],
+                 float_to_i32(sample.roll_rate_rad_s, 1000000.0f));
+    write_be_i32(&payload[12], float_to_i32(sample.pitch_rad, 1000000.0f));
+    write_be_i32(&payload[16],
+                 float_to_i32(sample.pitch_rate_rad_s, 1000000.0f));
+    for (uint8_t i = 0; i < 3U; ++i) {
+        write_be_i32(&payload[20 + i * 4U],
+                     float_to_i32(sample.accel_m_s2[i], 1000000.0f));
+        write_be_i32(&payload[32 + i * 4U],
+                     float_to_i32(sample.gyro_rad_s[i], 1000000.0f));
+    }
+    write_be_u32(&payload[44], debug->read_count);
+    write_be_u32(&payload[48], age_ms);
     return rpmsg_encode(type, seq, payload, sizeof(payload), out, out_size);
 }
 
@@ -737,14 +827,19 @@ int slave_app_init(void)
 {
     int balance_ret = balance_control_init();
     int gimbal_ret = gimbal_control_init();
+    int servo_ret = servo_motion_init();
 
-    return balance_ret != 0 ? balance_ret : gimbal_ret;
+    if (balance_ret != 0) {
+        return balance_ret;
+    }
+    return gimbal_ret != 0 ? gimbal_ret : servo_ret;
 }
 
 void slave_app_poll(void)
 {
     balance_control_poll();
     gimbal_control_poll();
+    servo_motion_poll();
 }
 
 void slave_app_shutdown(void)
@@ -810,13 +905,45 @@ size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply,
     case CMD_SERVO_POLARITY:
         handle_servo_polarity(frame.payload, frame.length);
         return build_ack(frame.seq, reply, reply_size);
+    case CMD_SERVO_MOVE4: {
+        int status = handle_servo_move4(frame.payload, frame.length);
+        return build_servo_motion_ack(frame.type, frame.seq, (uint8_t)status,
+                                      reply, reply_size);
+    }
+    case CMD_SERVO_STATUS:
+        return build_servo_motion_ack(frame.type, frame.seq, SERVO_MOTION_OK,
+                                      reply, reply_size);
+    case CMD_SERVO_STOP:
+        servo_motion_stop();
+        return build_servo_motion_ack(frame.type, frame.seq, SERVO_MOTION_OK,
+                                      reply, reply_size);
     case CMD_IMU_INIT:
         handle_imu_init();
         return build_ack(frame.seq, reply, reply_size);
     case CMD_IMU_READ:
         handle_imu_read();
         return build_ack(frame.seq, reply, reply_size);
+    case CMD_IMU_TELEMETRY:
+        return build_imu_telemetry_ack(frame.type, frame.seq, UINT8_MAX,
+                                       reply, reply_size);
+    case CMD_IMU_CALIBRATE: {
+        uint8_t status = 2U;
+        uint16_t samples = frame.length >= 2U ?
+            read_be_u16(frame.payload) : 100U;
+        if (balance_control_get_telemetry()->state == BALANCE_STATE_DISABLED &&
+            gimbal_control_get_telemetry()->state == GIMBAL_STATE_DISABLED) {
+            status = 3U;
+            if (samples >= 20U && samples <= 500U &&
+                phytium_bmi088_calibrate_gyro(samples) == 0 &&
+                phytium_bmi088_update(0.01f) == 0) {
+                status = 0U;
+            }
+        }
+        return build_imu_telemetry_ack(frame.type, frame.seq, status,
+                                       reply, reply_size);
+    }
     case CMD_BALANCE_ENABLE:
+        servo_motion_stop();
         (void)balance_control_enable();
         return build_ack(frame.seq, reply, reply_size);
     case CMD_BALANCE_DISABLE:

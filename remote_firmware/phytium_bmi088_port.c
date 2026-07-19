@@ -80,6 +80,10 @@
 #define PHYTIUM_BMI088_PITCH_DIRECTION 1.0f
 #endif
 
+#ifndef PHYTIUM_BMI088_ROLL_DIRECTION
+#define PHYTIUM_BMI088_ROLL_DIRECTION 1.0f
+#endif
+
 typedef enum {
     BMI088_DEV_ACCEL = 0,
     BMI088_DEV_GYRO = 1
@@ -90,7 +94,7 @@ static FGpio g_accel_cs;
 static FGpio g_gyro_cs;
 static uint8_t g_ready;
 static PhytiumBmi088Sample g_sample;
-static float g_gyro_pitch_bias;
+static float g_gyro_bias[3];
 static PhytiumBmi088DebugState g_dbg = {
     .init_ret = -99,
     .last_ret = -99,
@@ -315,7 +319,7 @@ int phytium_bmi088_read_sample(void)
 
 int phytium_bmi088_calibrate_gyro(uint16_t sample_count)
 {
-    float sum = 0.0f;
+    float sum[3] = {0.0f, 0.0f, 0.0f};
 
     if (sample_count == 0U) {
         return -1;
@@ -327,17 +331,23 @@ int phytium_bmi088_calibrate_gyro(uint16_t sample_count)
         if (ret != 0) {
             return ret;
         }
-        sum += (float)g_dbg.gyro_raw[1] * BMI088_GYRO_SCALE;
+        for (int axis = 0; axis < 3; ++axis) {
+            sum[axis] += (float)g_dbg.gyro_raw[axis] * BMI088_GYRO_SCALE;
+        }
         fsleep_millisec(10);
     }
 
-    g_gyro_pitch_bias = sum / (float)sample_count;
+    for (int axis = 0; axis < 3; ++axis) {
+        g_gyro_bias[axis] = sum[axis] / (float)sample_count;
+    }
     g_sample.calibrated = 1U;
     return 0;
 }
 
 int phytium_bmi088_update(float dt_s)
 {
+    float roll_acc;
+    float roll_gyro;
     float pitch_acc;
     float pitch_gyro;
     uint8_t was_valid = g_sample.valid;
@@ -359,8 +369,17 @@ int phytium_bmi088_update(float dt_s)
         g_sample.gyro_rad_s[i] = (float)g_dbg.gyro_raw[i] * BMI088_GYRO_SCALE;
     }
 
+    g_sample.roll_rate_rad_s = PHYTIUM_BMI088_ROLL_DIRECTION *
+                               (g_sample.gyro_rad_s[0] - g_gyro_bias[0]);
+    roll_acc = PHYTIUM_BMI088_ROLL_DIRECTION *
+               atan2f(g_sample.accel_m_s2[1], g_sample.accel_m_s2[2]);
+    roll_gyro = g_sample.roll_rad + g_sample.roll_rate_rad_s * dt_s;
+    g_sample.roll_rad = was_valid ?
+        BMI088_COMPLEMENTARY_ALPHA * roll_gyro +
+        (1.0f - BMI088_COMPLEMENTARY_ALPHA) * roll_acc : roll_acc;
+
     g_sample.pitch_rate_rad_s = PHYTIUM_BMI088_PITCH_DIRECTION *
-                                (g_sample.gyro_rad_s[1] - g_gyro_pitch_bias);
+                                (g_sample.gyro_rad_s[1] - g_gyro_bias[1]);
     pitch_acc = PHYTIUM_BMI088_PITCH_DIRECTION *
                 atan2f(-g_sample.accel_m_s2[0],
                        sqrtf(g_sample.accel_m_s2[1] * g_sample.accel_m_s2[1] +

@@ -12,7 +12,7 @@ $(BUILD_DIR):
 
 test: $(BUILD_DIR) $(BUILD_DIR)/test_protocol $(BUILD_DIR)/test_motor_can \
 	$(BUILD_DIR)/test_motor_balance_protocol $(BUILD_DIR)/test_lqr_controller \
-	$(BUILD_DIR)/test_gimbal_controller
+	$(BUILD_DIR)/test_gimbal_controller $(BUILD_DIR)/test_servo_motion_controller
 
 client: $(BUILD_DIR) $(BUILD_DIR)/rpmsg_client
 
@@ -33,6 +33,9 @@ $(BUILD_DIR)/test_lqr_controller: remote_firmware/lqr_controller.c remote_firmwa
 	$(CC) $(CFLAGS) -I./remote_firmware $(filter %.c,$^) -lm -o $@
 
 $(BUILD_DIR)/test_gimbal_controller: remote_firmware/gimbal_controller.c remote_firmware/gimbal_controller.h remote_firmware/motor_can.c remote_firmware/motor_can.h tests/gimbal_controller_test.c tests/stubs/fgeneric_timer.h tests/stubs/fparameters.h
+	$(CC) $(CFLAGS) -I./tests/stubs -I./remote_firmware $(filter %.c,$^) -o $@
+
+$(BUILD_DIR)/test_servo_motion_controller: remote_firmware/servo_motion_controller.c remote_firmware/servo_motion_controller.h remote_firmware/phytium_servo_port.h tests/servo_motion_controller_test.c tests/stubs/fgeneric_timer.h
 	$(CC) $(CFLAGS) -I./tests/stubs -I./remote_firmware $(filter %.c,$^) -o $@
 
 $(BUILD_DIR)/gimbal_test: src/rpmsg_protocol.c src/rpmsg_protocol.h linux_user/gimbal_test.c

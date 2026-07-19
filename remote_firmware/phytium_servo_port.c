@@ -11,6 +11,7 @@
 #define SERVO_MIN_US 500U
 #define SERVO_MAX_US 2500U
 #define SERVO_MAX_ANGLE_DEG 180U
+#define SERVO_MAX_ANGLE_X10_DEG 1800U
 
 /*
  * One FPWM controller has two independent channels when dead-zone output is
@@ -40,6 +41,7 @@ static PhytiumServoDebugState g_servo_debug = {
     .last_pwm_id = 0xff,
     .last_channel = 0xff,
     .angle_deg = {90, 90, 90, 90},
+    .angle_x10_deg = {900, 900, 900, 900},
     .pulse_us = {1500, 1500, 1500, 1500},
 };
 
@@ -48,11 +50,18 @@ static uint16_t servo_clamp_angle(uint16_t angle_deg)
     return angle_deg > SERVO_MAX_ANGLE_DEG ? SERVO_MAX_ANGLE_DEG : angle_deg;
 }
 
-static uint16_t servo_angle_to_pulse_us(uint16_t angle_deg)
+static uint16_t servo_clamp_angle_x10(uint16_t angle_x10_deg)
 {
-    angle_deg = servo_clamp_angle(angle_deg);
+    return angle_x10_deg > SERVO_MAX_ANGLE_X10_DEG ?
+        SERVO_MAX_ANGLE_X10_DEG : angle_x10_deg;
+}
+
+static uint16_t servo_angle_x10_to_pulse_us(uint16_t angle_x10_deg)
+{
+    angle_x10_deg = servo_clamp_angle_x10(angle_x10_deg);
     return (uint16_t)(SERVO_MIN_US +
-                      ((uint32_t)(SERVO_MAX_US - SERVO_MIN_US) * angle_deg) / SERVO_MAX_ANGLE_DEG);
+        ((uint32_t)(SERVO_MAX_US - SERVO_MIN_US) * angle_x10_deg) /
+        SERVO_MAX_ANGLE_X10_DEG);
 }
 
 static uint16_t servo_pulse_to_ccr_us(uint16_t pulse_us)
@@ -195,6 +204,13 @@ int phytium_servo_init(void)
 
 int phytium_servo_set_angle(uint8_t servo_id, uint16_t angle_deg)
 {
+    angle_deg = servo_clamp_angle(angle_deg);
+    return phytium_servo_set_angle_x10(servo_id,
+                                       (uint16_t)(angle_deg * 10U));
+}
+
+int phytium_servo_set_angle_x10(uint8_t servo_id, uint16_t angle_x10_deg)
+{
     FError ret;
     uint16_t pulse_us;
     uint16_t ccr;
@@ -213,13 +229,14 @@ int phytium_servo_set_angle(uint8_t servo_id, uint16_t angle_deg)
         }
     }
 
-    angle_deg = servo_clamp_angle(angle_deg);
-    pulse_us = servo_angle_to_pulse_us(angle_deg);
+    angle_x10_deg = servo_clamp_angle_x10(angle_x10_deg);
+    pulse_us = servo_angle_x10_to_pulse_us(angle_x10_deg);
     ccr = servo_pulse_to_ccr_us(pulse_us);
     map = &g_servo_map[servo_id];
 
     if (!map->enabled) {
-        g_servo_debug.angle_deg[servo_id] = angle_deg;
+        g_servo_debug.angle_deg[servo_id] = angle_x10_deg / 10U;
+        g_servo_debug.angle_x10_deg[servo_id] = angle_x10_deg;
         g_servo_debug.pulse_us[servo_id] = pulse_us;
         g_servo_debug.last_servo_id = servo_id;
         g_servo_debug.last_pwm_id = (uint8_t)map->pwm_id;
@@ -239,7 +256,8 @@ int phytium_servo_set_angle(uint8_t servo_id, uint16_t angle_deg)
         return -3;
     }
 
-    g_servo_debug.angle_deg[servo_id] = angle_deg;
+    g_servo_debug.angle_deg[servo_id] = angle_x10_deg / 10U;
+    g_servo_debug.angle_x10_deg[servo_id] = angle_x10_deg;
     g_servo_debug.pulse_us[servo_id] = pulse_us;
     g_servo_debug.last_servo_id = servo_id;
     g_servo_debug.last_pwm_id = (uint8_t)map->pwm_id;
@@ -253,6 +271,20 @@ int phytium_servo_set_all(const uint16_t angle_deg[PHYTIUM_SERVO_NUM])
     int ret = 0;
     for (uint8_t i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
         int one_ret = phytium_servo_set_angle(i, angle_deg[i]);
+        if (one_ret != 0) {
+            ret = one_ret;
+        }
+    }
+    return ret;
+}
+
+int phytium_servo_set_all_x10(
+    const uint16_t angle_x10_deg[PHYTIUM_SERVO_NUM])
+{
+    int ret = 0;
+
+    for (uint8_t i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
+        int one_ret = phytium_servo_set_angle_x10(i, angle_x10_deg[i]);
         if (one_ret != 0) {
             ret = one_ret;
         }

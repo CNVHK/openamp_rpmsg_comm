@@ -16,6 +16,8 @@ typedef struct {
 typedef struct {
     float accel_m_s2[3];
     float gyro_rad_s[3];
+    float roll_rad;
+    float roll_rate_rad_s;
     float pitch_rad;
     float pitch_rate_rad_s;
     uint64_t update_tick;

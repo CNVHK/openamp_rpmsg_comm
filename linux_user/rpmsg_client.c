@@ -9,7 +9,7 @@
 #include <sys/select.h>
 #include <unistd.h>
 
-#define RPMSG_CLIENT_VERSION "0.18.1-gimbal-diagnostics"
+#define RPMSG_CLIENT_VERSION "0.19.0-leg-servo-roll"
 #define RAD_PER_DEG 0.017453292519943295f
 
 static int wait_readable(int fd, int timeout_ms)
@@ -123,8 +123,13 @@ static void usage(const char *prog)
     printf("  %s <rpmsg_dev> servo <s0_deg> <s1_deg> <s2_deg> <s3_deg>\n", prog);
     printf("  %s <rpmsg_dev> servopol <0..7>\n", prog);
     printf("  %s <rpmsg_dev> servocenter\n", prog);
+    printf("  %s <rpmsg_dev> servo-move <duration_ms> <s0_deg> <s1_deg> <s2_deg> <s3_deg>\n", prog);
+    printf("  %s <rpmsg_dev> servo-status\n", prog);
+    printf("  %s <rpmsg_dev> servo-stop\n", prog);
     printf("  %s <rpmsg_dev> imuinit\n", prog);
     printf("  %s <rpmsg_dev> imuread\n", prog);
+    printf("  %s <rpmsg_dev> imu-attitude\n", prog);
+    printf("  %s <rpmsg_dev> imu-calibrate [20..500_samples]\n", prog);
     printf("  %s <rpmsg_dev> balance-enable\n", prog);
     printf("  %s <rpmsg_dev> balance-disable\n", prog);
     printf("  %s <rpmsg_dev> balance-status\n", prog);
@@ -145,8 +150,13 @@ static void usage(const char *prog)
     printf("  %s /dev/rpmsg0 servo 90 90 90 90\n", prog);
     printf("  %s /dev/rpmsg0 servopol 4\n", prog);
     printf("  %s /dev/rpmsg0 servocenter\n", prog);
+    printf("  %s /dev/rpmsg0 servo-move 3000 85 95 85 95\n", prog);
+    printf("  %s /dev/rpmsg0 servo-status\n", prog);
+    printf("  %s /dev/rpmsg0 servo-stop\n", prog);
     printf("  %s /dev/rpmsg0 imuinit\n", prog);
     printf("  %s /dev/rpmsg0 imuread\n", prog);
+    printf("  watch -n 0.1 '%s /dev/rpmsg0 imu-attitude'\n", prog);
+    printf("  %s /dev/rpmsg0 imu-calibrate 100\n", prog);
     printf("  watch -n 0.1 '%s /dev/rpmsg0 imuread'\n", prog);
     printf("  %s /dev/rpmsg0 balance-enable\n", prog);
     printf("  watch -n 0.1 '%s /dev/rpmsg0 balance-status'\n", prog);
@@ -336,6 +346,46 @@ static int build_command(int argc, char **argv, uint8_t *type, uint8_t *payload,
         return 0;
     }
 
+    if (strcmp(cmd, "servo-move") == 0) {
+        char *end = NULL;
+        unsigned long duration_ms;
+
+        if (argc < 8) return -1;
+        duration_ms = strtoul(argv[3], &end, 0);
+        if (end == argv[3] || *end != '\0' ||
+            duration_ms < 100U || duration_ms > 10000U) {
+            return -1;
+        }
+        for (int i = 0; i < 4; ++i) {
+            float angle;
+
+            end = NULL;
+            angle = strtof(argv[4 + i], &end);
+            if (end == argv[4 + i] || *end != '\0' || !isfinite(angle) ||
+                angle < 0.0f || angle > 180.0f) {
+                return -1;
+            }
+            put_be_u16(&payload[i * 2],
+                       (uint16_t)(angle * 10.0f + 0.5f));
+        }
+        put_be_u16(&payload[8], (uint16_t)duration_ms);
+        *type = CMD_SERVO_MOVE4;
+        *payload_len = 10U;
+        return 0;
+    }
+
+    if (strcmp(cmd, "servo-status") == 0) {
+        *type = CMD_SERVO_STATUS;
+        *payload_len = 0U;
+        return 0;
+    }
+
+    if (strcmp(cmd, "servo-stop") == 0) {
+        *type = CMD_SERVO_STOP;
+        *payload_len = 0U;
+        return 0;
+    }
+
     if (strcmp(cmd, "imuinit") == 0) {
         *type = CMD_IMU_INIT;
         *payload_len = 0;
@@ -345,6 +395,29 @@ static int build_command(int argc, char **argv, uint8_t *type, uint8_t *payload,
     if (strcmp(cmd, "imuread") == 0) {
         *type = CMD_IMU_READ;
         *payload_len = 0;
+        return 0;
+    }
+
+    if (strcmp(cmd, "imu-attitude") == 0) {
+        *type = CMD_IMU_TELEMETRY;
+        *payload_len = 0U;
+        return 0;
+    }
+
+    if (strcmp(cmd, "imu-calibrate") == 0) {
+        char *end = NULL;
+        unsigned long samples = 100U;
+
+        if (argc >= 4) {
+            samples = strtoul(argv[3], &end, 0);
+            if (end == argv[3] || *end != '\0' ||
+                samples < 20U || samples > 500U) {
+                return -1;
+            }
+        }
+        *type = CMD_IMU_CALIBRATE;
+        put_be_u16(payload, (uint16_t)samples);
+        *payload_len = 2U;
         return 0;
     }
 
@@ -601,6 +674,82 @@ int main(int argc, char **argv)
                    (double)register_speed / (double)periodic,
                    (double)position_speed / (double)periodic);
         }
+        close(fd);
+        return status == 0U ? 0 : 4;
+    }
+    if (type >= CMD_SERVO_MOVE4 && type <= CMD_SERVO_STOP) {
+        static const char *const status_names[] = {
+            "ok", "invalid", "busy", "balance-active", "hardware-error"
+        };
+        static const char *const state_names[] = {
+            "idle", "moving", "fault"
+        };
+        uint8_t status;
+        uint8_t state;
+
+        if (ack.type != type ||
+            ack.length < SERVO_MOTION_TELEMETRY_PAYLOAD_SIZE ||
+            ack.payload[0] != SERVO_MOTION_TELEMETRY_VERSION) {
+            printf("invalid servo motion reply\n");
+            close(fd);
+            return 3;
+        }
+        status = ack.payload[1];
+        state = ack.payload[2];
+        printf("servo motion: status=%s(%u) state=%s(%u) last_error=%d remaining=%u ms\n",
+               status < 5U ? status_names[status] : "unknown", status,
+               state < 3U ? state_names[state] : "unknown", state,
+               (int8_t)ack.payload[3], read_be_u32(&ack.payload[4]));
+        printf("commanded angle (no position feedback): current=%.1f,%.1f,%.1f,%.1f deg target=%.1f,%.1f,%.1f,%.1f deg\n",
+               (double)read_be_u16(&ack.payload[8]) / 10.0,
+               (double)read_be_u16(&ack.payload[10]) / 10.0,
+               (double)read_be_u16(&ack.payload[12]) / 10.0,
+               (double)read_be_u16(&ack.payload[14]) / 10.0,
+               (double)read_be_u16(&ack.payload[16]) / 10.0,
+               (double)read_be_u16(&ack.payload[18]) / 10.0,
+               (double)read_be_u16(&ack.payload[20]) / 10.0,
+               (double)read_be_u16(&ack.payload[22]) / 10.0);
+        printf("servo pwm: pulse_us=%u,%u,%u,%u\n",
+               read_be_u16(&ack.payload[24]),
+               read_be_u16(&ack.payload[26]),
+               read_be_u16(&ack.payload[28]),
+               read_be_u16(&ack.payload[30]));
+        close(fd);
+        return status == 0U ? 0 : 4;
+    }
+    if (type == CMD_IMU_TELEMETRY || type == CMD_IMU_CALIBRATE) {
+        static const char *const status_names[] = {
+            "ok", "no-sample", "busy", "calibration-failed"
+        };
+        uint8_t status;
+
+        if (ack.type != type ||
+            ack.length < IMU_TELEMETRY_PAYLOAD_SIZE ||
+            ack.payload[0] != IMU_TELEMETRY_VERSION) {
+            printf("invalid IMU telemetry reply\n");
+            close(fd);
+            return 3;
+        }
+        status = ack.payload[1];
+        printf("imu attitude: status=%s(%u) valid=%u calibrated=%u age_ms=%u samples=%u\n",
+               status < 4U ? status_names[status] : "unknown", status,
+               ack.payload[2], ack.payload[3],
+               read_be_u32(&ack.payload[48]),
+               read_be_u32(&ack.payload[44]));
+        printf("attitude: roll=%.3f deg roll_rate=%.4f rad/s pitch=%.3f deg pitch_rate=%.4f rad/s\n",
+               (double)read_be_i32(&ack.payload[4]) / 1000000.0 /
+                   RAD_PER_DEG,
+               (double)read_be_i32(&ack.payload[8]) / 1000000.0,
+               (double)read_be_i32(&ack.payload[12]) / 1000000.0 /
+                   RAD_PER_DEG,
+               (double)read_be_i32(&ack.payload[16]) / 1000000.0);
+        printf("imu scaled: accel=%.4f,%.4f,%.4f m/s^2 gyro=%.4f,%.4f,%.4f rad/s\n",
+               (double)read_be_i32(&ack.payload[20]) / 1000000.0,
+               (double)read_be_i32(&ack.payload[24]) / 1000000.0,
+               (double)read_be_i32(&ack.payload[28]) / 1000000.0,
+               (double)read_be_i32(&ack.payload[32]) / 1000000.0,
+               (double)read_be_i32(&ack.payload[36]) / 1000000.0,
+               (double)read_be_i32(&ack.payload[40]) / 1000000.0);
         close(fd);
         return status == 0U ? 0 : 4;
     }
