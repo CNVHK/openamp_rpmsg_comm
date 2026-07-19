@@ -11,8 +11,9 @@ typedef enum {
     GIMBAL_STATE_STARTING = 1,
     GIMBAL_STATE_HOMING = 2,
     GIMBAL_STATE_ACTIVE = 3,
-    GIMBAL_STATE_STOPPING = 4,
-    GIMBAL_STATE_FAULT = 5
+    GIMBAL_STATE_RETURNING = 4,
+    GIMBAL_STATE_STOPPING = 5,
+    GIMBAL_STATE_FAULT = 6
 } GimbalState;
 
 typedef enum {
@@ -81,12 +82,16 @@ typedef struct {
     uint32_t yaw_feedback_age_ms;
     uint32_t pitch_feedback_age_ms;
     uint32_t command_timeout_remaining_ms;
+    int32_t startup_pitch_x100_deg;
 } GimbalTelemetry;
 
 int gimbal_control_init(void);
 void gimbal_control_poll(void);
 void gimbal_control_shutdown(void);
-int gimbal_control_enable(uint8_t home_torque_percent);
+int gimbal_control_enable(uint8_t home_torque_percent,
+                          uint16_t home_speed_rpm,
+                          uint8_t return_torque_percent,
+                          uint16_t return_speed_rpm);
 int gimbal_control_disable(void);
 void gimbal_control_emergency_stop(void);
 int gimbal_control_set_target(int32_t yaw_x100_deg,

@@ -77,7 +77,9 @@ static GimbalLimits test_limits(void)
 
 static void start_and_finish_homing(uint8_t home_torque_percent)
 {
-    assert(gimbal_control_enable(home_torque_percent) == GIMBAL_STATUS_OK);
+    assert(gimbal_control_enable(home_torque_percent, 5U,
+                                 home_torque_percent, 5U) ==
+           GIMBAL_STATUS_OK);
     assert(gimbal_control_get_telemetry()->state == GIMBAL_STATE_STARTING);
     assert(gimbal_control_get_telemetry()->command_torque_percent ==
            home_torque_percent);
@@ -101,10 +103,15 @@ static void test_limits_and_homing(void)
     g_sent_count = 0U;
     set_feedback(0, 0, 0, 0);
     assert(gimbal_control_init() == 0);
-    assert(gimbal_control_enable(10U) == GIMBAL_STATUS_LIMITS_NOT_READY);
+    assert(gimbal_control_enable(10U, 5U, 10U, 5U) ==
+           GIMBAL_STATUS_LIMITS_NOT_READY);
     assert(gimbal_control_set_limits(&limits) == GIMBAL_STATUS_OK);
-    assert(gimbal_control_enable(4U) == GIMBAL_STATUS_INVALID);
-    assert(gimbal_control_enable(51U) == GIMBAL_STATUS_INVALID);
+    assert(gimbal_control_enable(4U, 5U, 10U, 5U) ==
+           GIMBAL_STATUS_INVALID);
+    assert(gimbal_control_enable(51U, 5U, 10U, 5U) ==
+           GIMBAL_STATUS_INVALID);
+    assert(gimbal_control_enable(10U, 0U, 10U, 5U) ==
+           GIMBAL_STATUS_INVALID);
     start_and_finish_homing(15U);
     assert(g_sent[0].id == 0x603U && g_sent[0].data[2] == 0x60U);
     assert(g_sent[1].id == 0x604U && g_sent[1].data[2] == 0x60U);
@@ -200,14 +207,15 @@ static void test_enable_feedback_wakeup(void)
     memset(g_feedback, 0, sizeof(g_feedback));
     assert(gimbal_control_init() == 0);
     assert(gimbal_control_set_limits(&limits) == GIMBAL_STATUS_OK);
-    assert(gimbal_control_enable(10U) == GIMBAL_STATUS_NO_FEEDBACK);
+    assert(gimbal_control_enable(10U, 5U, 10U, 5U) ==
+           GIMBAL_STATUS_NO_FEEDBACK);
     assert(g_sent_count == 4U);
 
     advance_ms(20U);
     gimbal_control_poll();
     assert(g_sent_count == 8U);
     set_feedback(0, 0, 0, 0);
-    assert(gimbal_control_enable(10U) == GIMBAL_STATUS_OK);
+    assert(gimbal_control_enable(10U, 5U, 10U, 5U) == GIMBAL_STATUS_OK);
     assert(gimbal_control_get_telemetry()->state == GIMBAL_STATE_STARTING);
     assert(g_sent_count == 12U);
     assert(g_sent[8].data[2] == 0xa0U);
@@ -236,16 +244,42 @@ static void test_position_command_refresh(void)
 static void test_controlled_disable(void)
 {
     GimbalLimits limits = test_limits();
+    unsigned int before;
 
     g_now = 1000U;
     g_sent_count = 0U;
     assert(gimbal_control_init() == 0);
-    set_feedback(0, 0, 0, 0);
+    set_feedback(0, 1500, 0, 0);
     assert(gimbal_control_set_limits(&limits) == GIMBAL_STATUS_OK);
-    start_and_finish_homing(10U);
+    assert(gimbal_control_enable(15U, 5U, 20U, 4U) == GIMBAL_STATUS_OK);
+    assert(gimbal_control_get_telemetry()->startup_pitch_x100_deg == 1500);
+    advance_ms(20U);
+    gimbal_control_poll();
+    advance_ms(20U);
+    set_feedback(0, 0, 0, 0);
+    gimbal_control_poll();
+    for (unsigned int i = 0; i < 10U; ++i) {
+        advance_ms(10U);
+        gimbal_control_poll();
+    }
+    assert(gimbal_control_get_telemetry()->state == GIMBAL_STATE_ACTIVE);
+    set_feedback(500, -500, 0, 0);
+    advance_ms(10U);
+    before = g_sent_count;
     assert(gimbal_control_disable() == GIMBAL_STATUS_OK);
+    assert(gimbal_control_get_telemetry()->state == GIMBAL_STATE_RETURNING);
+    assert(gimbal_control_get_telemetry()->yaw_target_x100_deg == 500);
+    assert(gimbal_control_get_telemetry()->pitch_target_x100_deg == 1500);
+    assert(g_sent_count == before + 2U);
+    assert(g_sent[before].data[6] == 4U && g_sent[before].data[7] == 20U);
+
+    set_feedback(500, 1500, 0, 0);
+    for (unsigned int i = 0; i < 10U; ++i) {
+        advance_ms(10U);
+        gimbal_control_poll();
+    }
     assert(gimbal_control_get_telemetry()->state == GIMBAL_STATE_STOPPING);
-    for (unsigned int i = 0; i < 5U; ++i) {
+    for (unsigned int i = 0; i < 10U; ++i) {
         advance_ms(100U);
         gimbal_control_poll();
     }

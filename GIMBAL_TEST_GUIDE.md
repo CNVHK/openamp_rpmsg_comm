@@ -30,7 +30,13 @@ sudo ./build/gimbal_test /dev/rpmsg0 status
 - `state=disabled`
 - `feedback valid=0x03`
 - yaw/pitch 角度、电流、转速能够读取
-- 从核刚重启时 `limits valid=0x00`，这是正常的，因为限位目前只保存在 RAM
+- 从核刚重启时 `limits valid=0x00` 是正常的；执行 `enable` 时客户端会从 `gimbal.conf` 自动恢复
+
+仓库根目录的 `gimbal.conf` 是常用云台配置。先确认其中四个角度与当前实机标定结果一致；归位、关闭返回和普通动作的速度/力矩也在这里设置。若命令不是从仓库目录执行，可设置：
+
+```bash
+export GIMBAL_CONFIG=$HOME/openamp_rpmsg_comm/gimbal.conf
+```
 
 **2. 永久零点**
 
@@ -75,7 +81,7 @@ limits: valid=0x0f
 - pitch 最小值 < 0，最大值 > 0
 - 数值确实对应安全范围
 
-记下四个角度。以后从核重启后可直接恢复限位，例如：
+记下四个角度并写入仓库根目录的 `gimbal.conf`。以后从核重启后执行 `enable` 会自动恢复限位，也可直接手动恢复，例如：
 
 ```bash
 sudo ./build/gimbal_test /dev/rpmsg0 limits <yaw_min> <yaw_max> <pitch_min> <pitch_max> CONFIRM
@@ -108,11 +114,10 @@ fault=0x08
 如果 idle 状态没有周期反馈，`enable` 会先在零力矩模式唤醒两轴反馈，工具自动等待后再启动归零；不要连续重复执行 `enable`。
 
 ```bash
-sudo ./build/gimbal_test /dev/rpmsg0 enable 15
+sudo ./build/gimbal_test /dev/rpmsg0 enable
 ```
 
-`enable` 后的可选参数是归位力矩百分比，允许范围为 `5..50`，省略时为
-`10`。负载较重且反馈持续正常但轴无法移动时，应按 `15`、`20`、`25`
+`enable` 默认使用 `gimbal.conf` 的归位速度和力矩。后面的可选参数是仅本次生效的归位力矩百分比，允许范围为 `5..50`。负载较重且反馈持续正常但轴无法移动时，应按 `15`、`20`、`25`
 逐级增加。调高前必须托住相机并确认软件限位正确，禁止直接使用 50% 试撞
 机械限位。
 
@@ -188,17 +193,19 @@ sudo ./build/gimbal_test /dev/rpmsg0 set 51 0 5 10
 
 ```bash
 sudo ./build/gimbal_test /dev/rpmsg0 disable
-sleep 1
-sudo ./build/gimbal_test /dev/rpmsg0 status
+for i in $(seq 1 60); do
+    sudo ./build/gimbal_test /dev/rpmsg0 status
+    sleep 0.2
+done
 ```
 
 预期：
 
 ```text
-active -> stopping -> disabled
+active -> returning -> stopping -> disabled
 ```
 
-关闭过程约0.5秒，先保持当前位置并逐步降低力矩。摄像头仍需托住，因为完全失能后是否下坠取决于重心和机械阻尼。
+从核会记录 `enable` 时的 pitch。关闭时保持当前 yaw，先按 `gimbal.conf` 的返回速度/力矩缓慢回到该 pitch，稳定后再逐步降低力矩。`status` 的 `startup return pitch` 可核对记录值。摄像头仍需托住，因为完全失能后是否下坠取决于重心和机械阻尼。
 
 **9. 验证紧急停止**
 

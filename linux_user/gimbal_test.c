@@ -25,10 +25,28 @@
 #define LIMIT_FEEDBACK_RETRIES 20U
 #define GIMBAL_REPLY_NO_FEEDBACK 3U
 
+typedef struct {
+    int loaded;
+    int32_t yaw_min_x100_deg;
+    int32_t yaw_max_x100_deg;
+    int32_t pitch_min_x100_deg;
+    int32_t pitch_max_x100_deg;
+    uint16_t home_speed_rpm;
+    uint8_t home_torque_percent;
+    uint16_t return_speed_rpm;
+    uint8_t return_torque_percent;
+    uint16_t move_speed_rpm;
+    uint8_t move_torque_percent;
+} GimbalFileConfig;
+
 static volatile sig_atomic_t g_stop_requested;
 static uint8_t g_seq;
+static GimbalFileConfig g_config;
 
 static int sleep_ms(unsigned int delay_ms);
+static int parse_double(const char *text, double *value);
+static int parse_uint(const char *text, unsigned long max,
+                      unsigned long *value);
 
 static void request_stop(int signo)
 {
@@ -152,7 +170,8 @@ static uint16_t read_be_u16(const uint8_t *p)
 static const char *gimbal_state_name(uint8_t state)
 {
     static const char *const names[] = {
-        "disabled", "starting", "homing", "active", "stopping", "fault"
+        "disabled", "starting", "homing", "active", "returning",
+        "stopping", "fault"
     };
     return state < sizeof(names) / sizeof(names[0]) ? names[state] : "unknown";
 }
@@ -202,6 +221,8 @@ static int print_gimbal_reply(const RpmsgFrame *reply)
            (double)read_be_i32(&p[36]) / 100.0,
            (double)read_be_i32(&p[40]) / 100.0,
            (double)read_be_i32(&p[44]) / 100.0);
+    printf("startup return pitch: %.2f deg\n",
+           (double)read_be_i32(&p[64]) / 100.0);
     return status == 0U ? 0 : -1;
 }
 
@@ -321,7 +342,8 @@ static int run_sweep(int fd, double angle_deg, unsigned int cycles)
     for (unsigned int cycle = 0; cycle < cycles && !g_stop_requested; ++cycle) {
         for (size_t i = 0; i < sizeof(path) / sizeof(path[0]); ++i) {
             if (set_gimbal(fd, path[i][0] * angle_deg, path[i][1] * angle_deg,
-                           DEFAULT_SPEED_RPM, DEFAULT_TORQUE_PERCENT) != 0) {
+                           g_config.move_speed_rpm,
+                           g_config.move_torque_percent) != 0) {
                 return -1;
             }
             if (sleep_ms(DEFAULT_SWEEP_DELAY_MS) != 0) {
@@ -365,11 +387,161 @@ static int parse_uint(const char *text, unsigned long max, unsigned long *value)
     return errno == 0 && end != text && *end == '\0' && *value <= max ? 0 : -1;
 }
 
+static char *trim_text(char *text)
+{
+    char *end;
+
+    while (*text == ' ' || *text == '\t' || *text == '\r' || *text == '\n') {
+        ++text;
+    }
+    end = text + strlen(text);
+    while (end > text && (end[-1] == ' ' || end[-1] == '\t' ||
+                          end[-1] == '\r' || end[-1] == '\n')) {
+        --end;
+    }
+    *end = '\0';
+    return text;
+}
+
+static void init_gimbal_config_defaults(void)
+{
+    memset(&g_config, 0, sizeof(g_config));
+    g_config.home_speed_rpm = 5U;
+    g_config.home_torque_percent = DEFAULT_TORQUE_PERCENT;
+    g_config.return_speed_rpm = 5U;
+    g_config.return_torque_percent = DEFAULT_TORQUE_PERCENT;
+    g_config.move_speed_rpm = DEFAULT_SPEED_RPM;
+    g_config.move_torque_percent = DEFAULT_TORQUE_PERCENT;
+}
+
+static int load_gimbal_config(const char *path)
+{
+    FILE *file;
+    char line[256];
+    unsigned int seen = 0U;
+
+    file = fopen(path, "r");
+    if (file == NULL) {
+        if (errno == ENOENT) {
+            return 0;
+        }
+        perror(path);
+        return -1;
+    }
+    while (fgets(line, sizeof(line), file) != NULL) {
+        char *comment = strchr(line, '#');
+        char *equals;
+        char *key;
+        char *value;
+        double degrees;
+        unsigned long number;
+
+        if (comment != NULL) {
+            *comment = '\0';
+        }
+        key = trim_text(line);
+        if (*key == '\0') {
+            continue;
+        }
+        equals = strchr(key, '=');
+        if (equals == NULL) {
+            fprintf(stderr, "%s: invalid line: %s\n", path, key);
+            fclose(file);
+            return -1;
+        }
+        *equals = '\0';
+        value = trim_text(equals + 1);
+        key = trim_text(key);
+        if (strcmp(key, "yaw_min_deg") == 0 &&
+            parse_double(value, &degrees) == 0 &&
+            degrees_to_x100(degrees, &g_config.yaw_min_x100_deg) == 0) {
+            seen |= 1U << 0;
+        } else if (strcmp(key, "yaw_max_deg") == 0 &&
+                   parse_double(value, &degrees) == 0 &&
+                   degrees_to_x100(degrees,
+                                   &g_config.yaw_max_x100_deg) == 0) {
+            seen |= 1U << 1;
+        } else if (strcmp(key, "pitch_min_deg") == 0 &&
+                   parse_double(value, &degrees) == 0 &&
+                   degrees_to_x100(degrees,
+                                   &g_config.pitch_min_x100_deg) == 0) {
+            seen |= 1U << 2;
+        } else if (strcmp(key, "pitch_max_deg") == 0 &&
+                   parse_double(value, &degrees) == 0 &&
+                   degrees_to_x100(degrees,
+                                   &g_config.pitch_max_x100_deg) == 0) {
+            seen |= 1U << 3;
+        } else if (strcmp(key, "home_speed_rpm") == 0 &&
+                   parse_uint(value, 60U, &number) == 0 && number >= 1U) {
+            g_config.home_speed_rpm = (uint16_t)number;
+            seen |= 1U << 4;
+        } else if (strcmp(key, "home_torque_percent") == 0 &&
+                   parse_uint(value, 50U, &number) == 0 && number >= 5U) {
+            g_config.home_torque_percent = (uint8_t)number;
+            seen |= 1U << 5;
+        } else if (strcmp(key, "return_speed_rpm") == 0 &&
+                   parse_uint(value, 60U, &number) == 0 && number >= 1U) {
+            g_config.return_speed_rpm = (uint16_t)number;
+            seen |= 1U << 6;
+        } else if (strcmp(key, "return_torque_percent") == 0 &&
+                   parse_uint(value, 50U, &number) == 0 && number >= 5U) {
+            g_config.return_torque_percent = (uint8_t)number;
+            seen |= 1U << 7;
+        } else if (strcmp(key, "move_speed_rpm") == 0 &&
+                   parse_uint(value, 1000U, &number) == 0 && number >= 1U) {
+            g_config.move_speed_rpm = (uint16_t)number;
+            seen |= 1U << 8;
+        } else if (strcmp(key, "move_torque_percent") == 0 &&
+                   parse_uint(value, 100U, &number) == 0 && number >= 1U) {
+            g_config.move_torque_percent = (uint8_t)number;
+            seen |= 1U << 9;
+        } else {
+            fprintf(stderr, "%s: invalid key or value: %s=%s\n",
+                    path, key, value);
+            fclose(file);
+            return -1;
+        }
+    }
+    fclose(file);
+    if (seen != 0x3ffU || g_config.yaw_min_x100_deg >= 0 ||
+        g_config.yaw_max_x100_deg <= 0 ||
+        g_config.pitch_min_x100_deg >= 0 ||
+        g_config.pitch_max_x100_deg <= 0 ||
+        g_config.yaw_min_x100_deg >= g_config.yaw_max_x100_deg ||
+        g_config.pitch_min_x100_deg >= g_config.pitch_max_x100_deg) {
+        fprintf(stderr, "%s: incomplete or invalid gimbal configuration\n",
+                path);
+        return -1;
+    }
+    g_config.loaded = 1;
+    return 0;
+}
+
+static int apply_config_limits(int fd, const char *path)
+{
+    uint8_t payload[16];
+    const int32_t limits[4] = {
+        g_config.yaw_min_x100_deg, g_config.yaw_max_x100_deg,
+        g_config.pitch_min_x100_deg, g_config.pitch_max_x100_deg,
+    };
+
+    if (!g_config.loaded) {
+        return 0;
+    }
+    for (unsigned int i = 0U; i < 4U; ++i) {
+        put_be_i32(&payload[i * 4U], limits[i]);
+    }
+    printf("Applying persistent limits from %s.\n", path);
+    return send_gimbal_command(fd, CMD_GIMBAL_SET_LIMITS, payload,
+                               sizeof(payload));
+}
+
 static void usage(const char *program)
 {
     printf("Usage:\n");
     printf("  %s <rpmsg_dev> setzero CONFIRM\n", program);
     printf("  %s <rpmsg_dev> enable|init [home_torque_pct: 5..50]\n", program);
+    printf("  configuration: ${GIMBAL_CONFIG:-gimbal.conf}\n");
     printf("  %s <rpmsg_dev> disable|stop\n", program);
     printf("  %s <rpmsg_dev> estop\n", program);
     printf("  %s <rpmsg_dev> set <yaw_deg> <pitch_deg> [speed_rpm] [torque_pct]\n", program);
@@ -386,6 +558,8 @@ int main(int argc, char **argv)
 {
     const char *device;
     const char *command;
+    const char *config_path;
+    int needs_config;
     int fd;
     int ret = -1;
 
@@ -395,6 +569,20 @@ int main(int argc, char **argv)
     }
     device = argv[1];
     command = argv[2];
+    init_gimbal_config_defaults();
+    config_path = getenv("GIMBAL_CONFIG");
+    if (config_path == NULL || *config_path == '\0') {
+        config_path = "gimbal.conf";
+    }
+    needs_config = strcmp(command, "init") == 0 ||
+                   strcmp(command, "enable") == 0 ||
+                   strcmp(command, "set") == 0 ||
+                   strcmp(command, "center") == 0 ||
+                   strcmp(command, "sweep") == 0 ||
+                   strcmp(command, "test") == 0;
+    if (needs_config && load_gimbal_config(config_path) != 0) {
+        return 1;
+    }
     signal(SIGINT, request_stop);
     signal(SIGTERM, request_stop);
 
@@ -419,25 +607,34 @@ int main(int argc, char **argv)
             }
         }
     } else if (strcmp(command, "init") == 0 || strcmp(command, "enable") == 0) {
-        unsigned long home_torque = DEFAULT_TORQUE_PERCENT;
-        uint8_t payload[1];
+        unsigned long home_torque = g_config.home_torque_percent;
+        uint8_t payload[6];
         if (argc >= 4 &&
             (parse_uint(argv[3], 50U, &home_torque) != 0 ||
              home_torque < 5U)) {
             fprintf(stderr, "home torque must be 5..50 percent\n");
         } else {
             payload[0] = (uint8_t)home_torque;
-            printf("Starting gimbal and slowly homing both axes to zero "
-                   "with %lu%% torque.\n", home_torque);
-            ret = send_gimbal_command_with_feedback_retry(
-                fd, CMD_GIMBAL_ENABLE, payload, sizeof(payload),
-                "safe startup");
+            put_be_u16(&payload[1], g_config.home_speed_rpm);
+            payload[3] = g_config.return_torque_percent;
+            put_be_u16(&payload[4], g_config.return_speed_rpm);
+            printf("Starting gimbal: home=%u rpm/%lu%%, "
+                   "shutdown return=%u rpm/%u%%.\n",
+                   g_config.home_speed_rpm, home_torque,
+                   g_config.return_speed_rpm,
+                   g_config.return_torque_percent);
+            ret = apply_config_limits(fd, config_path);
+            if (ret == 0) {
+                ret = send_gimbal_command_with_feedback_retry(
+                    fd, CMD_GIMBAL_ENABLE, payload, sizeof(payload),
+                    "safe startup");
+            }
         }
     } else if (strcmp(command, "set") == 0 && argc >= 5) {
         double yaw;
         double pitch;
-        unsigned long speed = DEFAULT_SPEED_RPM;
-        unsigned long torque = DEFAULT_TORQUE_PERCENT;
+        unsigned long speed = g_config.move_speed_rpm;
+        unsigned long torque = g_config.move_torque_percent;
         if (parse_double(argv[3], &yaw) != 0 || parse_double(argv[4], &pitch) != 0 ||
             (argc >= 6 && parse_uint(argv[5], 1000U, &speed) != 0) ||
             (argc >= 7 && parse_uint(argv[6], 100U, &torque) != 0)) {
@@ -446,8 +643,8 @@ int main(int argc, char **argv)
             ret = set_gimbal(fd, yaw, pitch, (uint16_t)speed, (uint8_t)torque);
         }
     } else if (strcmp(command, "center") == 0) {
-        ret = set_gimbal(fd, 0.0, 0.0, DEFAULT_SPEED_RPM,
-                         DEFAULT_TORQUE_PERCENT);
+        ret = set_gimbal(fd, 0.0, 0.0, g_config.move_speed_rpm,
+                         g_config.move_torque_percent);
     } else if (strcmp(command, "sweep") == 0) {
         double angle = DEFAULT_SWEEP_DEG;
         unsigned long cycles = 1;
@@ -466,7 +663,8 @@ int main(int argc, char **argv)
         }
     } else if (strcmp(command, "stop") == 0 ||
                strcmp(command, "disable") == 0) {
-        printf("Holding current pose, ramping torque down, then entering idle.\n");
+        printf("Returning pitch to its enable-time angle, then ramping "
+               "torque down and entering idle.\n");
         ret = send_gimbal_command(fd, CMD_GIMBAL_DISABLE, NULL, 0U);
     } else if (strcmp(command, "estop") == 0) {
         ret = send_gimbal_command(fd, CMD_GIMBAL_EMERGENCY_STOP, NULL, 0U);

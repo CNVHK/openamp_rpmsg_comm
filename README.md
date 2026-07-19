@@ -272,7 +272,24 @@ sudo ./build/gimbal_test /dev/rpmsg0 status
 
 只有显示 `limits: valid=0x0f` 才允许启动。最小值必须为负角度、最大值必须为正角度，永久零点必须位于每一对边界之间。
 
-软件边界目前保存在从核 RAM 中，从核重启后会清除。记录好四个实机角度后，可以直接恢复：
+软件边界在从核重启后会清除。仓库根目录的 `gimbal.conf` 保存四个实机边界和常用运动参数；`enable` 会自动读取该文件并在启动前恢复软件边界，不再需要每次手动执行 `limits`。配置项如下：
+
+```ini
+yaw_min_deg=-37.94
+yaw_max_deg=213.97
+pitch_min_deg=-50.13
+pitch_max_deg=97.50
+home_speed_rpm=5
+home_torque_percent=15
+return_speed_rpm=5
+return_torque_percent=15
+move_speed_rpm=20
+move_torque_percent=15
+```
+
+四个角度必须替换成当前机械结构的实测安全边界。需要把配置放在其他路径时设置 `GIMBAL_CONFIG=/path/to/gimbal.conf`。配置文件不存在时保留旧的手动限位工作方式；配置存在但内容不完整或越界时，运动命令会拒绝执行。`estop`、`disable`、`status` 和标定命令不依赖配置文件，配置写错时仍可停机和重新标定。
+
+也可以直接手动恢复：
 
 ```bash
 sudo ./build/gimbal_test /dev/rpmsg0 limits -60 60 -25 35 CONFIRM
@@ -291,7 +308,7 @@ sudo ./build/gimbal_test /dev/rpmsg0 enable 15
 sudo ./build/gimbal_test /dev/rpmsg0 status
 ```
 
-`enable` 的可选参数是 `5..50` 的归位力矩百分比，省略时为 10%；重载较大时应从 `15` 开始逐级测试，不要直接使用 50% 撞击机械限位。`init` 是 `enable` 的兼容别名。只有状态为 `active` 才接受目标。yaw 和 pitch 通过一条原子 RPMsg 命令提交，从核先同时检查两轴边界，再连续发出两条 CAN 帧：
+`enable` 默认使用 `gimbal.conf` 中的归位速度和力矩；可选参数是 `5..50` 的临时归位力矩百分比，只覆盖本次启动。重载较大时应逐级测试，不要直接使用 50% 撞击机械限位。`init` 是 `enable` 的兼容别名。只有状态为 `active` 才接受目标。yaw 和 pitch 通过一条原子 RPMsg 命令提交，从核先同时检查两轴边界，再连续发出两条 CAN 帧：
 
 ```bash
 sudo ./build/gimbal_test /dev/rpmsg0 set 5 0
@@ -306,14 +323,14 @@ sudo ./build/gimbal_test /dev/rpmsg0 sweep 5 2
 
 ### 受控关闭和紧急停止
 
-正常关闭先保持当前实际位置，每 100 ms 降低 2% 力矩，约 0.5 秒后进入 idle。应等待状态变成 `disabled` 再断电：
+每次 `enable` 收到两轴新鲜反馈后，从核都会记录当时的 pitch。正常关闭保持当前 yaw，先按 `gimbal.conf` 的返回速度和力矩把 pitch 缓慢送回该启动角度；到位并稳定后，每 100 ms 降低 2% 力矩，最后进入 idle。状态依次为 `active -> returning -> stopping -> disabled`，应等待 `disabled` 再断电：
 
 ```bash
 sudo ./build/gimbal_test /dev/rpmsg0 disable
 sudo ./build/gimbal_test /dev/rpmsg0 status
 ```
 
-`stop` 是 `disable` 的兼容别名。即将碰撞、机构卡死或其他紧急情况使用立即 idle，不经过力矩缓降：
+`stop` 是 `disable` 的兼容别名。返回阶段反馈丢失、越界、超时或 CAN 失败会立即进入 fault 并 idle，不会盲目继续运动。即将碰撞、机构卡死或其他紧急情况使用立即 idle，不返回启动角度，也不经过力矩缓降：
 
 ```bash
 sudo ./build/gimbal_test /dev/rpmsg0 estop

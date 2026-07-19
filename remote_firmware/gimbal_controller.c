@@ -13,6 +13,8 @@
 #define GIMBAL_DEFAULT_TORQUE_PERCENT 10U
 #define GIMBAL_MIN_HOME_TORQUE_PERCENT 5U
 #define GIMBAL_MAX_HOME_TORQUE_PERCENT 50U
+#define GIMBAL_MIN_CONFIG_SPEED_RPM 1U
+#define GIMBAL_MAX_CONFIG_SPEED_RPM 60U
 #define GIMBAL_FEEDBACK_TIMEOUT_MS 500U
 #define GIMBAL_HOME_TIMEOUT_MS 12000U
 #define GIMBAL_START_DELAY_MS 20U
@@ -40,7 +42,13 @@ static uint64_t g_motion_deadline_tick;
 static uint16_t g_target_timeout_ms;
 static uint8_t g_start_phase;
 static uint8_t g_home_settle_samples;
+static uint8_t g_return_settle_samples;
 static uint8_t g_stop_torque_percent;
+static uint8_t g_home_torque_percent;
+static uint8_t g_return_torque_percent;
+static uint16_t g_home_speed_rpm;
+static uint16_t g_return_speed_rpm;
+static uint8_t g_startup_pitch_valid;
 static uint8_t g_calibration_feedback_active;
 static uint8_t g_calibration_phase;
 static uint64_t g_calibration_step_tick;
@@ -269,7 +277,13 @@ int gimbal_control_init(void)
     g_target_timeout_ms = 0U;
     g_start_phase = 0U;
     g_home_settle_samples = 0U;
+    g_return_settle_samples = 0U;
     g_stop_torque_percent = 0U;
+    g_home_torque_percent = GIMBAL_DEFAULT_TORQUE_PERCENT;
+    g_return_torque_percent = GIMBAL_DEFAULT_TORQUE_PERCENT;
+    g_home_speed_rpm = GIMBAL_HOME_SPEED_RPM;
+    g_return_speed_rpm = GIMBAL_HOME_SPEED_RPM;
+    g_startup_pitch_valid = 0U;
     g_calibration_feedback_active = 0U;
     g_calibration_phase = 0U;
     g_calibration_step_tick = 0U;
@@ -282,7 +296,10 @@ int gimbal_control_init(void)
     return g_timer_frequency == 0U ? -1 : 0;
 }
 
-int gimbal_control_enable(uint8_t home_torque_percent)
+int gimbal_control_enable(uint8_t home_torque_percent,
+                          uint16_t home_speed_rpm,
+                          uint8_t return_torque_percent,
+                          uint16_t return_speed_rpm)
 {
     MotorCanFrame frame;
     uint64_t now;
@@ -292,7 +309,13 @@ int gimbal_control_enable(uint8_t home_torque_percent)
         return GIMBAL_STATUS_BUSY;
     }
     if (home_torque_percent < GIMBAL_MIN_HOME_TORQUE_PERCENT ||
-        home_torque_percent > GIMBAL_MAX_HOME_TORQUE_PERCENT) {
+        home_torque_percent > GIMBAL_MAX_HOME_TORQUE_PERCENT ||
+        return_torque_percent < GIMBAL_MIN_HOME_TORQUE_PERCENT ||
+        return_torque_percent > GIMBAL_MAX_HOME_TORQUE_PERCENT ||
+        home_speed_rpm < GIMBAL_MIN_CONFIG_SPEED_RPM ||
+        home_speed_rpm > GIMBAL_MAX_CONFIG_SPEED_RPM ||
+        return_speed_rpm < GIMBAL_MIN_CONFIG_SPEED_RPM ||
+        return_speed_rpm > GIMBAL_MAX_CONFIG_SPEED_RPM) {
         return GIMBAL_STATUS_INVALID;
     }
     if (!limits_are_valid(&g_telemetry.limits)) {
@@ -314,9 +337,16 @@ int gimbal_control_enable(uint8_t home_torque_percent)
     }
 
     g_telemetry.fault = GIMBAL_FAULT_NONE;
+    g_telemetry.startup_pitch_x100_deg =
+        g_telemetry.pitch_position_x100_deg;
+    g_startup_pitch_valid = 1U;
+    g_home_torque_percent = home_torque_percent;
+    g_return_torque_percent = return_torque_percent;
+    g_home_speed_rpm = home_speed_rpm;
+    g_return_speed_rpm = return_speed_rpm;
     g_telemetry.yaw_target_x100_deg = 0;
     g_telemetry.pitch_target_x100_deg = 0;
-    g_telemetry.command_speed_rpm = GIMBAL_HOME_SPEED_RPM;
+    g_telemetry.command_speed_rpm = g_home_speed_rpm;
     g_telemetry.command_torque_percent = home_torque_percent;
     g_target_timeout_ms = 0U;
     g_motion_deadline_tick = 0U;
@@ -345,7 +375,8 @@ int gimbal_control_disable(void)
         return stop_calibration_feedback() == 0 ?
             GIMBAL_STATUS_OK : GIMBAL_STATUS_CAN_ERROR;
     }
-    if (g_telemetry.state == GIMBAL_STATE_STOPPING) {
+    if (g_telemetry.state == GIMBAL_STATE_RETURNING ||
+        g_telemetry.state == GIMBAL_STATE_STOPPING) {
         return GIMBAL_STATUS_OK;
     }
     if (g_telemetry.state == GIMBAL_STATE_FAULT) {
@@ -354,19 +385,28 @@ int gimbal_control_disable(void)
     }
     now = GenericTimerRead(GENERIC_TIMER_ID0);
     update_feedback(now);
-    if (g_telemetry.feedback_valid_mask == 0x03U) {
-        g_telemetry.yaw_target_x100_deg =
-            g_telemetry.yaw_position_x100_deg;
-        g_telemetry.pitch_target_x100_deg =
-            g_telemetry.pitch_position_x100_deg;
+    if (g_telemetry.feedback_valid_mask != 0x03U ||
+        !g_startup_pitch_valid ||
+        !target_is_valid(g_telemetry.yaw_position_x100_deg,
+                         g_telemetry.startup_pitch_x100_deg)) {
+        gimbal_control_emergency_stop();
+        return GIMBAL_STATUS_NO_FEEDBACK;
     }
-    g_stop_torque_percent = g_telemetry.command_torque_percent;
-    g_stop_step_tick = now;
-    g_telemetry.state = GIMBAL_STATE_STOPPING;
+    g_telemetry.yaw_target_x100_deg = g_telemetry.yaw_position_x100_deg;
+    g_telemetry.pitch_target_x100_deg =
+        g_telemetry.startup_pitch_x100_deg;
+    g_telemetry.command_speed_rpm = g_return_speed_rpm;
+    g_telemetry.command_torque_percent = g_return_torque_percent;
+    g_return_settle_samples = 0U;
+    g_position_refresh_tick = now;
+    set_motion_deadline(now, g_telemetry.yaw_target_x100_deg,
+                        g_telemetry.pitch_target_x100_deg,
+                        g_return_speed_rpm);
+    g_telemetry.state = GIMBAL_STATE_RETURNING;
     if (send_position_both(g_telemetry.yaw_target_x100_deg,
                            g_telemetry.pitch_target_x100_deg,
-                           GIMBAL_HOME_SPEED_RPM,
-                           g_stop_torque_percent) != 0) {
+                           g_return_speed_rpm,
+                           g_return_torque_percent) != 0) {
         enter_fault(GIMBAL_FAULT_CAN);
         return GIMBAL_STATUS_CAN_ERROR;
     }
@@ -592,8 +632,8 @@ void gimbal_control_poll(void)
             g_state_tick = now;
             return;
         }
-        if (send_position_both(0, 0, GIMBAL_HOME_SPEED_RPM,
-                               g_telemetry.command_torque_percent) != 0) {
+        if (send_position_both(0, 0, g_home_speed_rpm,
+                               g_home_torque_percent) != 0) {
             enter_fault(GIMBAL_FAULT_CAN);
             return;
         }
@@ -618,8 +658,8 @@ void gimbal_control_poll(void)
 
         if (now - g_position_refresh_tick >=
             ms_to_ticks(GIMBAL_POSITION_REFRESH_MS)) {
-            if (send_position_both(0, 0, GIMBAL_HOME_SPEED_RPM,
-                                   g_telemetry.command_torque_percent) != 0) {
+            if (send_position_both(0, 0, g_home_speed_rpm,
+                                   g_home_torque_percent) != 0) {
                 enter_fault(GIMBAL_FAULT_CAN);
                 return;
             }
@@ -645,6 +685,58 @@ void gimbal_control_poll(void)
         return;
     }
 
+    if (g_telemetry.state == GIMBAL_STATE_RETURNING) {
+        int32_t pitch_error = abs_i32(
+            g_telemetry.startup_pitch_x100_deg -
+            g_telemetry.pitch_position_x100_deg);
+        int yaw_speed = g_telemetry.yaw_speed_rpm < 0 ?
+            -(int)g_telemetry.yaw_speed_rpm :
+             (int)g_telemetry.yaw_speed_rpm;
+        int pitch_speed = g_telemetry.pitch_speed_rpm < 0 ?
+            -(int)g_telemetry.pitch_speed_rpm :
+             (int)g_telemetry.pitch_speed_rpm;
+
+        if (now - g_position_refresh_tick >=
+            ms_to_ticks(GIMBAL_POSITION_REFRESH_MS)) {
+            if (send_position_both(g_telemetry.yaw_target_x100_deg,
+                                   g_telemetry.pitch_target_x100_deg,
+                                   g_return_speed_rpm,
+                                   g_return_torque_percent) != 0) {
+                enter_fault(GIMBAL_FAULT_CAN);
+                return;
+            }
+            g_position_refresh_tick = now;
+        }
+        if (pitch_error <= GIMBAL_HOME_TOLERANCE_X100_DEG &&
+            yaw_speed <= GIMBAL_HOME_SPEED_TOLERANCE_RPM &&
+            pitch_speed <= GIMBAL_HOME_SPEED_TOLERANCE_RPM) {
+            if (++g_return_settle_samples >= GIMBAL_HOME_SETTLE_SAMPLES) {
+                g_telemetry.yaw_target_x100_deg =
+                    g_telemetry.yaw_position_x100_deg;
+                g_telemetry.pitch_target_x100_deg =
+                    g_telemetry.pitch_position_x100_deg;
+                g_stop_torque_percent = g_return_torque_percent;
+                g_stop_step_tick = now;
+                g_motion_deadline_tick = 0U;
+                g_telemetry.state = GIMBAL_STATE_STOPPING;
+                if (send_position_both(
+                        g_telemetry.yaw_target_x100_deg,
+                        g_telemetry.pitch_target_x100_deg,
+                        g_return_speed_rpm,
+                        g_stop_torque_percent) != 0) {
+                    enter_fault(GIMBAL_FAULT_CAN);
+                }
+            }
+        } else {
+            g_return_settle_samples = 0U;
+        }
+        if (g_telemetry.state == GIMBAL_STATE_RETURNING &&
+            now >= g_motion_deadline_tick) {
+            enter_fault(GIMBAL_FAULT_MOTION_TIMEOUT);
+        }
+        return;
+    }
+
     if (g_telemetry.state == GIMBAL_STATE_STOPPING) {
         if (now - g_stop_step_tick < ms_to_ticks(GIMBAL_STOP_STEP_MS)) {
             return;
@@ -663,7 +755,7 @@ void gimbal_control_poll(void)
         g_stop_torque_percent -= GIMBAL_STOP_TORQUE_STEP_PERCENT;
         if (send_position_both(g_telemetry.yaw_target_x100_deg,
                                g_telemetry.pitch_target_x100_deg,
-                               GIMBAL_HOME_SPEED_RPM,
+                               g_return_speed_rpm,
                                g_stop_torque_percent) != 0) {
             enter_fault(GIMBAL_FAULT_CAN);
         }

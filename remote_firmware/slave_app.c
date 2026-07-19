@@ -470,6 +470,7 @@ static size_t build_gimbal_ack(uint8_t type, uint8_t seq, uint8_t status,
     write_be_u32(&payload[52], telemetry->yaw_feedback_age_ms);
     write_be_u32(&payload[56], telemetry->pitch_feedback_age_ms);
     write_be_u32(&payload[60], telemetry->command_timeout_remaining_ms);
+    write_be_i32(&payload[64], telemetry->startup_pitch_x100_deg);
     return rpmsg_encode(type, seq, payload, sizeof(payload), out, out_size);
 }
 
@@ -912,7 +913,16 @@ size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply,
     case CMD_GIMBAL_ENABLE: {
         uint8_t home_torque_percent =
             frame.length >= 1U ? frame.payload[0] : 10U;
-        int status = gimbal_control_enable(home_torque_percent);
+        uint16_t home_speed_rpm =
+            frame.length >= 3U ? read_be_u16(&frame.payload[1]) : 5U;
+        uint8_t return_torque_percent =
+            frame.length >= 4U ? frame.payload[3] : home_torque_percent;
+        uint16_t return_speed_rpm =
+            frame.length >= 6U ? read_be_u16(&frame.payload[4]) : 5U;
+        int status = gimbal_control_enable(home_torque_percent,
+                                           home_speed_rpm,
+                                           return_torque_percent,
+                                           return_speed_rpm);
         return build_gimbal_ack(frame.type, frame.seq, (uint8_t)status,
                                 reply, reply_size);
     }
