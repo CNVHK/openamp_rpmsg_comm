@@ -35,7 +35,7 @@ typedef enum {
     CMD_SERVO_MOVE4 = 33,
     CMD_SERVO_STATUS = 34,
     CMD_SERVO_STOP = 35,
-    CMD_SERVO_ADOPT4 = 36,
+    CMD_LEG_ENABLE = 36,
     CMD_LEG_MOVE4 = 37,
     CMD_IMU_INIT = 40,
     CMD_IMU_READ = 41,

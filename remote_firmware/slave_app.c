@@ -84,21 +84,15 @@ static void write_be_u16(uint8_t *p, uint16_t value)
     p[1] = (uint8_t)(value & 0xff);
 }
 
-static int handle_servo_adopt4(const uint8_t *payload, uint8_t length)
+static int handle_servo_enable4(const uint16_t angles[PHYTIUM_SERVO_NUM])
 {
-    uint16_t angles[PHYTIUM_SERVO_NUM];
-
-    if (length < PHYTIUM_SERVO_NUM * 2U ||
-        balance_control_get_telemetry()->state != BALANCE_STATE_DISABLED) {
-        return length < PHYTIUM_SERVO_NUM * 2U ?
-            SERVO_MOTION_INVALID : SERVO_MOTION_BALANCE_ACTIVE;
+    if (angles == NULL) {
+        return SERVO_MOTION_INVALID;
     }
-
-    for (int i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
-        angles[i] = read_be_u16(&payload[i * 2]);
+    if (balance_control_get_telemetry()->state != BALANCE_STATE_DISABLED) {
+        return SERVO_MOTION_BALANCE_ACTIVE;
     }
-
-    return servo_motion_adopt(angles);
+    return servo_motion_enable_at_target(angles);
 }
 
 static void handle_servo_set4(const uint8_t *payload, uint8_t length)
@@ -112,7 +106,11 @@ static void handle_servo_set4(const uint8_t *payload, uint8_t length)
         write_be_u16(&payload_x10[i * 2U],
                      (uint16_t)(read_be_u16(&payload[i * 2U]) * 10U));
     }
-    (void)handle_servo_adopt4(payload_x10, sizeof(payload_x10));
+    uint16_t angles[PHYTIUM_SERVO_NUM];
+    for (uint8_t i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
+        angles[i] = read_be_u16(&payload_x10[i * 2U]);
+    }
+    (void)handle_servo_enable4(angles);
 }
 
 static void handle_servo_center(void)
@@ -122,7 +120,7 @@ static void handle_servo_center(void)
     if (balance_control_get_telemetry()->state != BALANCE_STATE_DISABLED) {
         return;
     }
-    (void)servo_motion_adopt(angles);
+    (void)servo_motion_enable_at_target(angles);
 }
 
 static void handle_servo_polarity(const uint8_t *payload, uint8_t length)
@@ -134,7 +132,7 @@ static void handle_servo_polarity(const uint8_t *payload, uint8_t length)
 
     phytium_servo_set_polarity(payload[0]);
     const uint16_t angles[PHYTIUM_SERVO_NUM] = {450, 1350, 450, 1350};
-    (void)servo_motion_adopt(angles);
+    (void)servo_motion_enable_at_target(angles);
 }
 
 static int handle_servo_move4(const uint8_t *payload, uint8_t length)
@@ -952,13 +950,11 @@ size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply,
         servo_motion_stop();
         return build_servo_motion_ack(frame.type, frame.seq, SERVO_MOTION_OK,
                                       reply, reply_size);
-    case CMD_SERVO_ADOPT4: {
-        if (!leg_raw_angles_are_safe(frame.payload, frame.length)) {
-            return build_servo_motion_ack(frame.type, frame.seq,
-                                          SERVO_MOTION_INVALID,
-                                          reply, reply_size);
-        }
-        int status = handle_servo_adopt4(frame.payload, frame.length);
+    case CMD_LEG_ENABLE: {
+        const uint16_t safe_reference[PHYTIUM_SERVO_NUM] = {
+            450U, 1350U, 450U, 1350U
+        };
+        int status = handle_servo_enable4(safe_reference);
         return build_servo_motion_ack(frame.type, frame.seq, (uint8_t)status,
                                       reply, reply_size);
     }

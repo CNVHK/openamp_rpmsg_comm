@@ -10,6 +10,7 @@
 #define SERVO_MOTION_MIN_DURATION_MS 100U
 #define SERVO_MOTION_MAX_DURATION_MS 10000U
 #define SERVO_MOTION_MAX_ANGLE_X10_DEG 1800U
+#define SERVO_MOTION_STARTUP_SETTLE_MS 3000U
 
 static ServoMotionTelemetry g_telemetry;
 static uint16_t g_start_angle_x10_deg[PHYTIUM_SERVO_NUM];
@@ -54,36 +55,45 @@ int servo_motion_init(void)
     update_debug_pulses();
     /* PWM servos have no position feedback. Debug values after reset are not
      * proof of the physical pose, so motion must remain blocked until an
-     * operator explicitly adopts a known pose. */
+     * operator explicitly enables a supported startup at the safe target. */
     g_telemetry.state = SERVO_MOTION_UNARMED;
     return 0;
 }
 
-int servo_motion_adopt(
-    const uint16_t current_angle_x10_deg[PHYTIUM_SERVO_NUM])
+int servo_motion_enable_at_target(
+    const uint16_t target_angle_x10_deg[PHYTIUM_SERVO_NUM])
 {
-    if (current_angle_x10_deg == NULL ||
-        g_telemetry.state == SERVO_MOTION_MOVING) {
-        return current_angle_x10_deg == NULL ?
-            SERVO_MOTION_INVALID : SERVO_MOTION_BUSY;
+    uint64_t now;
+
+    if (target_angle_x10_deg == NULL) {
+        return SERVO_MOTION_INVALID;
+    }
+    if (g_telemetry.state == SERVO_MOTION_MOVING ||
+        g_telemetry.state == SERVO_MOTION_STARTING) {
+        return SERVO_MOTION_BUSY;
     }
     for (uint8_t i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
-        if (current_angle_x10_deg[i] > SERVO_MOTION_MAX_ANGLE_X10_DEG) {
+        if (target_angle_x10_deg[i] > SERVO_MOTION_MAX_ANGLE_X10_DEG) {
             return SERVO_MOTION_INVALID;
         }
     }
-    if (phytium_servo_set_all_x10(current_angle_x10_deg) != 0) {
+    if (phytium_servo_set_all_x10(target_angle_x10_deg) != 0) {
         g_telemetry.state = SERVO_MOTION_FAULT;
         g_telemetry.last_error = -2;
         return SERVO_MOTION_HARDWARE_ERROR;
     }
     for (uint8_t i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
-        g_telemetry.current_angle_x10_deg[i] = current_angle_x10_deg[i];
-        g_telemetry.target_angle_x10_deg[i] = current_angle_x10_deg[i];
+        /* These are commanded coordinates. PWM servos provide no measured
+         * joint position, especially during the first movement after enable. */
+        g_telemetry.current_angle_x10_deg[i] = target_angle_x10_deg[i];
+        g_telemetry.target_angle_x10_deg[i] = target_angle_x10_deg[i];
     }
-    g_telemetry.remaining_ms = 0U;
+    now = GenericTimerRead(GENERIC_TIMER_ID0);
+    g_start_tick = now;
+    g_duration_ms = SERVO_MOTION_STARTUP_SETTLE_MS;
+    g_telemetry.remaining_ms = SERVO_MOTION_STARTUP_SETTLE_MS;
     g_telemetry.last_error = 0;
-    g_telemetry.state = SERVO_MOTION_IDLE;
+    g_telemetry.state = SERVO_MOTION_STARTING;
     update_debug_pulses();
     return SERVO_MOTION_OK;
 }
@@ -99,7 +109,8 @@ int servo_motion_start(
         duration_ms > SERVO_MOTION_MAX_DURATION_MS) {
         return SERVO_MOTION_INVALID;
     }
-    if (g_telemetry.state == SERVO_MOTION_MOVING) {
+    if (g_telemetry.state == SERVO_MOTION_MOVING ||
+        g_telemetry.state == SERVO_MOTION_STARTING) {
         return SERVO_MOTION_BUSY;
     }
     for (uint8_t i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
@@ -145,10 +156,21 @@ void servo_motion_poll(void)
     uint64_t now;
     uint32_t passed_ms;
 
-    if (g_telemetry.state != SERVO_MOTION_MOVING) {
+    if (g_telemetry.state != SERVO_MOTION_MOVING &&
+        g_telemetry.state != SERVO_MOTION_STARTING) {
         return;
     }
     now = GenericTimerRead(GENERIC_TIMER_ID0);
+    if (g_telemetry.state == SERVO_MOTION_STARTING) {
+        passed_ms = elapsed_ms(now);
+        if (passed_ms >= g_duration_ms) {
+            g_telemetry.remaining_ms = 0U;
+            g_telemetry.state = SERVO_MOTION_IDLE;
+        } else {
+            g_telemetry.remaining_ms = g_duration_ms - passed_ms;
+        }
+        return;
+    }
     if ((int64_t)(now - g_next_update_tick) < 0) {
         return;
     }

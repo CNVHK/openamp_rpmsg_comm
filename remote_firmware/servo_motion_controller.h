@@ -9,7 +9,8 @@ typedef enum {
     SERVO_MOTION_IDLE = 0,
     SERVO_MOTION_MOVING = 1,
     SERVO_MOTION_FAULT = 2,
-    SERVO_MOTION_UNARMED = 3
+    SERVO_MOTION_UNARMED = 3,
+    SERVO_MOTION_STARTING = 4
 } ServoMotionState;
 
 enum {
@@ -31,8 +32,8 @@ typedef struct {
 } ServoMotionTelemetry;
 
 int servo_motion_init(void);
-int servo_motion_adopt(
-    const uint16_t current_angle_x10_deg[PHYTIUM_SERVO_NUM]);
+int servo_motion_enable_at_target(
+    const uint16_t target_angle_x10_deg[PHYTIUM_SERVO_NUM]);
 int servo_motion_start(
     const uint16_t target_angle_x10_deg[PHYTIUM_SERVO_NUM],
     uint16_t duration_ms);

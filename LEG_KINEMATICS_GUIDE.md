@@ -30,14 +30,15 @@
 转换实现位于 `src/leg_joint_mapping.*`。语义命令为：
 
 ```bash
-rprun leg-adopt <右前> <右后> <左前> <左后> CONFIRM
+rprun leg-enable CONFIRM
 rprun leg-joints <duration_ms> <右前> <右后> <左前> <左后>
 ```
 
 MG996R 没有位置反馈。从核重启或执行 `servo-stop` 后，控制器不知道腿的实际姿态，状态为
-`unarmed`，此时 `leg-joints` 会返回 `not-armed` 且不输出 PWM。必须支撑机器人、人工确认
-四腿确实处于给定姿态，再执行一次 `leg-adopt ... CONFIRM`。接管会直接输出该姿态的 PWM，
-所以姿态填错仍可能造成堵转；它不是自动回零功能。
+`unarmed`，此时 `leg-joints` 会返回 `not-armed` 且不输出 PWM。必须支撑机器人，再执行
+`leg-enable CONFIRM`。该命令不接受也不推断实际角度，只会输出固定安全参考命令：有效角
+`[45,45,45,45]`、原始角 `[45,135,45,135]`。控制器随后保持 `starting` 约 3 秒，期间拒绝
+轨迹命令。状态中的角度都是命令坐标，不是实测值；首次输出仍可能引起机械运动。
 
 ## 2. 五连杆模型
 
@@ -101,8 +102,8 @@ joint_angle = alpha +/- beta
 
 ## 4. 接入顺序
 
-1. 支撑机器人并把腿人工放到已确认的 45 度姿态，执行
-   `leg-adopt 45 45 45 45 CONFIRM`；确认状态为 `idle` 后，才用 `leg-joints` 做正负 2 度悬空动作。
+1. 支撑机器人并执行 `leg-enable CONFIRM`；等待约 3 秒并确认状态为 `idle` 后，才用
+   `leg-joints` 做减小 2 度再返回参考位的悬空动作。
 2. 测量四路机械安全角；几何参数 `b`、`L1`、`L2`、`x0`、`h0` 已录入。
 3. 用实测参数离线验证 45 度参考姿态的正逆解往返误差。
 4. 增加任务空间轨迹命令，让 `(x,h)` 在 50 Hz 下缓慢插值，并逐采样检查可达性和关节限位。

@@ -134,13 +134,14 @@ rprun servo-move 2000 90 90 90 90
 ```bash
 rprun balance-disable
 rprun servo-status
-rprun leg-adopt 45 45 45 45 CONFIRM
+rprun leg-enable CONFIRM
 rprun servo-status
 ```
 
-`leg-adopt` 不是运动命令。执行前必须支撑机器人，并人工确认四腿已经处于所填姿态；它会
-把该姿态作为无反馈轨迹控制器的真实起点并立即输出对应 PWM。上电后或 `servo-stop` 后若
-没有执行接管，`leg-joints` 必须返回 `not-armed`，这是防止固件把默认 90 度误当实际姿态。
+`leg-enable` 不声称知道实际关节角。执行前必须支撑机器人；它只会输出固定安全参考命令
+`[45,135,45,135]`，随后保持 `starting` 约 3 秒。MG996R 没有位置反馈，因此状态中的角度
+始终是命令坐标而非实测角度。启动稳定期结束前，`leg-joints` 必须返回 `busy`；上电后或
+`servo-stop` 后未启用时则必须返回 `not-armed`。
 
 装上连杆后优先使用 `leg-joints`。`servo-move` 是底层原始舵机命令，只用于连杆断开时
 逐路诊断，不应用它直接做并联腿同步动作。
@@ -157,7 +158,7 @@ rprun leg-joints 3000 45 45 45 45
 从人工确认的 45 度姿态小幅减小到 43 度，再返回 45 度。
 
 结束测试后执行 `rprun servo-stop` 会真正关闭四路 PWM，同时控制器回到 `unarmed`；下次
-运动必须重新人工确认并执行 `leg-adopt`。
+运动必须重新支撑机器人并执行 `leg-enable CONFIRM`。
 
 持续观察命令状态：
 
