@@ -912,7 +912,7 @@ size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply,
         return build_ack(frame.seq, reply, reply_size);
     case CMD_GIMBAL_ENABLE: {
         uint8_t home_torque_percent =
-            frame.length >= 1U ? frame.payload[0] : 10U;
+            frame.length >= 1U ? frame.payload[0] : 50U;
         uint16_t home_speed_rpm =
             frame.length >= 3U ? read_be_u16(&frame.payload[1]) : 5U;
         uint8_t return_torque_percent =

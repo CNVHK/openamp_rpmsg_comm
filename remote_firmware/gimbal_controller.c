@@ -10,9 +10,9 @@
 
 #define GIMBAL_HOME_SPEED_RPM 5U
 #define GIMBAL_DEFAULT_SPEED_RPM 20U
-#define GIMBAL_DEFAULT_TORQUE_PERCENT 10U
+#define GIMBAL_DEFAULT_TORQUE_PERCENT 50U
 #define GIMBAL_MIN_HOME_TORQUE_PERCENT 5U
-#define GIMBAL_MAX_HOME_TORQUE_PERCENT 50U
+#define GIMBAL_MAX_TORQUE_PERCENT 80U
 #define GIMBAL_MIN_CONFIG_SPEED_RPM 1U
 #define GIMBAL_MAX_CONFIG_SPEED_RPM 60U
 #define GIMBAL_FEEDBACK_TIMEOUT_MS 500U
@@ -309,9 +309,9 @@ int gimbal_control_enable(uint8_t home_torque_percent,
         return GIMBAL_STATUS_BUSY;
     }
     if (home_torque_percent < GIMBAL_MIN_HOME_TORQUE_PERCENT ||
-        home_torque_percent > GIMBAL_MAX_HOME_TORQUE_PERCENT ||
+        home_torque_percent > GIMBAL_MAX_TORQUE_PERCENT ||
         return_torque_percent < GIMBAL_MIN_HOME_TORQUE_PERCENT ||
-        return_torque_percent > GIMBAL_MAX_HOME_TORQUE_PERCENT ||
+        return_torque_percent > GIMBAL_MAX_TORQUE_PERCENT ||
         home_speed_rpm < GIMBAL_MIN_CONFIG_SPEED_RPM ||
         home_speed_rpm > GIMBAL_MAX_CONFIG_SPEED_RPM ||
         return_speed_rpm < GIMBAL_MIN_CONFIG_SPEED_RPM ||
@@ -433,7 +433,8 @@ int gimbal_control_set_target(int32_t yaw_x100_deg,
     }
     if (!target_is_valid(yaw_x100_deg, pitch_x100_deg) ||
         speed_rpm == 0U || speed_rpm > 1000U ||
-        torque_percent == 0U || torque_percent > 100U ||
+        torque_percent == 0U ||
+        torque_percent > GIMBAL_MAX_TORQUE_PERCENT ||
         (timeout_ms != 0U && timeout_ms < 100U)) {
         return GIMBAL_STATUS_INVALID;
     }

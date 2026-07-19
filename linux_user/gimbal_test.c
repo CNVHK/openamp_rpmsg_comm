@@ -17,7 +17,8 @@
 #define GIMBAL_PITCH_MOTOR_ID 4U
 
 #define DEFAULT_SPEED_RPM 20U
-#define DEFAULT_TORQUE_PERCENT 10U
+#define DEFAULT_TORQUE_PERCENT 50U
+#define MAX_TORQUE_PERCENT 80U
 #define DEFAULT_SWEEP_DEG 10.0
 #define DEFAULT_TEST_DEG 5.0
 #define DEFAULT_SWEEP_DELAY_MS 800U
@@ -476,7 +477,8 @@ static int load_gimbal_config(const char *path)
             g_config.home_speed_rpm = (uint16_t)number;
             seen |= 1U << 4;
         } else if (strcmp(key, "home_torque_percent") == 0 &&
-                   parse_uint(value, 50U, &number) == 0 && number >= 5U) {
+                   parse_uint(value, MAX_TORQUE_PERCENT, &number) == 0 &&
+                   number >= 5U) {
             g_config.home_torque_percent = (uint8_t)number;
             seen |= 1U << 5;
         } else if (strcmp(key, "return_speed_rpm") == 0 &&
@@ -484,7 +486,8 @@ static int load_gimbal_config(const char *path)
             g_config.return_speed_rpm = (uint16_t)number;
             seen |= 1U << 6;
         } else if (strcmp(key, "return_torque_percent") == 0 &&
-                   parse_uint(value, 50U, &number) == 0 && number >= 5U) {
+                   parse_uint(value, MAX_TORQUE_PERCENT, &number) == 0 &&
+                   number >= 5U) {
             g_config.return_torque_percent = (uint8_t)number;
             seen |= 1U << 7;
         } else if (strcmp(key, "move_speed_rpm") == 0 &&
@@ -492,7 +495,8 @@ static int load_gimbal_config(const char *path)
             g_config.move_speed_rpm = (uint16_t)number;
             seen |= 1U << 8;
         } else if (strcmp(key, "move_torque_percent") == 0 &&
-                   parse_uint(value, 100U, &number) == 0 && number >= 1U) {
+                   parse_uint(value, MAX_TORQUE_PERCENT, &number) == 0 &&
+                   number >= 1U) {
             g_config.move_torque_percent = (uint8_t)number;
             seen |= 1U << 9;
         } else {
@@ -540,7 +544,7 @@ static void usage(const char *program)
 {
     printf("Usage:\n");
     printf("  %s <rpmsg_dev> setzero CONFIRM\n", program);
-    printf("  %s <rpmsg_dev> enable|init [home_torque_pct: 5..50]\n", program);
+    printf("  %s <rpmsg_dev> enable|init [home_torque_pct: 5..80]\n", program);
     printf("  configuration: ${GIMBAL_CONFIG:-gimbal.conf}\n");
     printf("  %s <rpmsg_dev> disable|stop\n", program);
     printf("  %s <rpmsg_dev> estop\n", program);
@@ -610,9 +614,9 @@ int main(int argc, char **argv)
         unsigned long home_torque = g_config.home_torque_percent;
         uint8_t payload[6];
         if (argc >= 4 &&
-            (parse_uint(argv[3], 50U, &home_torque) != 0 ||
+            (parse_uint(argv[3], MAX_TORQUE_PERCENT, &home_torque) != 0 ||
              home_torque < 5U)) {
-            fprintf(stderr, "home torque must be 5..50 percent\n");
+            fprintf(stderr, "home torque must be 5..80 percent\n");
         } else {
             payload[0] = (uint8_t)home_torque;
             put_be_u16(&payload[1], g_config.home_speed_rpm);
@@ -637,7 +641,8 @@ int main(int argc, char **argv)
         unsigned long torque = g_config.move_torque_percent;
         if (parse_double(argv[3], &yaw) != 0 || parse_double(argv[4], &pitch) != 0 ||
             (argc >= 6 && parse_uint(argv[5], 1000U, &speed) != 0) ||
-            (argc >= 7 && parse_uint(argv[6], 100U, &torque) != 0)) {
+            (argc >= 7 &&
+             parse_uint(argv[6], MAX_TORQUE_PERCENT, &torque) != 0)) {
             fprintf(stderr, "invalid set argument\n");
         } else {
             ret = set_gimbal(fd, yaw, pitch, (uint16_t)speed, (uint8_t)torque);

@@ -108,7 +108,9 @@ static void test_limits_and_homing(void)
     assert(gimbal_control_set_limits(&limits) == GIMBAL_STATUS_OK);
     assert(gimbal_control_enable(4U, 5U, 10U, 5U) ==
            GIMBAL_STATUS_INVALID);
-    assert(gimbal_control_enable(51U, 5U, 10U, 5U) ==
+    assert(gimbal_control_enable(81U, 5U, 10U, 5U) ==
+           GIMBAL_STATUS_INVALID);
+    assert(gimbal_control_enable(10U, 5U, 81U, 5U) ==
            GIMBAL_STATUS_INVALID);
     assert(gimbal_control_enable(10U, 0U, 10U, 5U) ==
            GIMBAL_STATUS_INVALID);
@@ -126,6 +128,14 @@ static void test_target_and_limit_fault(void)
     assert(gimbal_control_set_target(1500, -500, 20U, 10U, 0U) ==
            GIMBAL_STATUS_OK);
     assert(g_sent_count == before + 2U);
+    before = g_sent_count;
+    assert(gimbal_control_set_target(1500, -500, 20U, 80U, 0U) ==
+           GIMBAL_STATUS_OK);
+    assert(g_sent_count == before + 2U);
+    before = g_sent_count;
+    assert(gimbal_control_set_target(1500, -500, 20U, 81U, 0U) ==
+           GIMBAL_STATUS_INVALID);
+    assert(g_sent_count == before);
     before = g_sent_count;
     assert(gimbal_control_set_target(6100, 0, 20U, 10U, 0U) ==
            GIMBAL_STATUS_INVALID);

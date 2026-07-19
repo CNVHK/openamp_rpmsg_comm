@@ -280,11 +280,11 @@ yaw_max_deg=213.97
 pitch_min_deg=-50.13
 pitch_max_deg=97.50
 home_speed_rpm=5
-home_torque_percent=15
+home_torque_percent=50
 return_speed_rpm=5
-return_torque_percent=15
+return_torque_percent=50
 move_speed_rpm=20
-move_torque_percent=15
+move_torque_percent=50
 ```
 
 四个角度必须替换成当前机械结构的实测安全边界。需要把配置放在其他路径时设置 `GIMBAL_CONFIG=/path/to/gimbal.conf`。配置文件不存在时保留旧的手动限位工作方式；配置存在但内容不完整或越界时，运动命令会拒绝执行。`estop`、`disable`、`status` 和标定命令不依赖配置文件，配置写错时仍可停机和重新标定。
@@ -308,7 +308,7 @@ sudo ./build/gimbal_test /dev/rpmsg0 enable 15
 sudo ./build/gimbal_test /dev/rpmsg0 status
 ```
 
-`enable` 默认使用 `gimbal.conf` 中的归位速度和力矩；可选参数是 `5..50` 的临时归位力矩百分比，只覆盖本次启动。重载较大时应逐级测试，不要直接使用 50% 撞击机械限位。`init` 是 `enable` 的兼容别名。只有状态为 `active` 才接受目标。yaw 和 pitch 通过一条原子 RPMsg 命令提交，从核先同时检查两轴边界，再连续发出两条 CAN 帧：
+`enable` 默认使用 `gimbal.conf` 中的归位速度和力矩；可选参数是 `5..80` 的临时归位力矩百分比，只覆盖本次启动。普通位置命令允许 `1..80%`。默认力矩为 50%；继续增大时必须逐级测试，不要使用 80% 试撞机械限位。`init` 是 `enable` 的兼容别名。只有状态为 `active` 才接受目标。yaw 和 pitch 通过一条原子 RPMsg 命令提交，从核先同时检查两轴边界，再连续发出两条 CAN 帧：
 
 ```bash
 sudo ./build/gimbal_test /dev/rpmsg0 set 5 0
