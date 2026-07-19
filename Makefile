@@ -28,7 +28,7 @@ gimbal: $(BUILD_DIR) $(BUILD_DIR)/gimbal_test
 broker: $(BUILD_DIR) $(BUILD_DIR)/rpmsg-broker
 
 firmware-elf:
-	./tools/build_openamp_elf.sh
+	bash ./tools/build_openamp_elf.sh
 
 install-rpmsg-broker: $(BUILD_DIR)/rpmsg-broker
 	install -d -m 0755 /usr/local/sbin
