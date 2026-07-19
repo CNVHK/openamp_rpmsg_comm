@@ -264,11 +264,9 @@ class RpmsgGimbal:
 
 
 class GimbalService:
-    def __init__(self, gimbal: RpmsgGimbal, limit_margin_deg: float = 3.0,
-                 max_return_pitch_deg: float = 5.0):
+    def __init__(self, gimbal: RpmsgGimbal, limit_margin_deg: float = 3.0):
         self.gimbal = gimbal
         self.limit_margin_deg = limit_margin_deg
-        self.max_return_pitch_deg = max_return_pitch_deg
 
     def _business_limits(self) -> tuple[float, float, float, float]:
         config = self.gimbal.config
@@ -281,7 +279,11 @@ class GimbalService:
         )
 
     def _return_position_is_safe(self, status: Telemetry) -> bool:
-        return abs(status.startup_pitch_deg) <= self.max_return_pitch_deg
+        config = self.gimbal.config
+        return (
+            config.pitch_min_deg <= status.startup_pitch_deg <=
+            config.pitch_max_deg
+        )
 
     def controlled_shutdown(self) -> Telemetry:
         status = self.gimbal.status()
@@ -352,7 +354,8 @@ class GimbalService:
                 unsafe_pitch = telemetry.startup_pitch_deg
                 self.gimbal.estop()
                 raise GimbalError(
-                    f"unsafe startup return pitch {unsafe_pitch:.2f} deg; "
+                    f"startup return pitch {unsafe_pitch:.2f} deg is outside "
+                    "configured pitch limits; "
                     "gimbal was emergency-stopped"
                 )
         elif command == "disable":
@@ -361,7 +364,8 @@ class GimbalService:
             status = self.gimbal.status()
             if not self._return_position_is_safe(status):
                 raise GimbalError(
-                    f"unsafe startup return pitch {status.startup_pitch_deg:.2f} deg; "
+                    f"startup return pitch {status.startup_pitch_deg:.2f} deg is "
+                    "outside configured pitch limits; "
                     "use estop instead of disable"
                 )
             telemetry = self.gimbal.disable()
@@ -412,7 +416,7 @@ def serve(args: argparse.Namespace) -> int:
     config = GimbalConfig.load(args.config)
     gimbal = RpmsgGimbal(args.device, config)
     gimbal.open()
-    service = GimbalService(gimbal, args.limit_margin_deg, args.max_return_pitch_deg)
+    service = GimbalService(gimbal, args.limit_margin_deg)
     socket_path = Path(args.socket)
     socket_path.parent.mkdir(parents=True, exist_ok=True)
     socket_path.unlink(missing_ok=True)
@@ -465,7 +469,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", default=DEFAULT_CONFIG)
     parser.add_argument("--socket", default=DEFAULT_SOCKET)
     parser.add_argument("--limit-margin-deg", type=float, default=3.0)
-    parser.add_argument("--max-return-pitch-deg", type=float, default=5.0)
     return parser
 
 

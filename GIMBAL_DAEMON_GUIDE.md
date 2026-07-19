@@ -80,6 +80,13 @@ use `reloadrproc` only after installing a new remote-core firmware image.
 Both `move_speed_rpm` and `move_torque_percent` apply to `set` and `center`
 after the daemon restarts.
 
+The pitch measured when `enable` starts is the normal shutdown return
+position. It may be a folded or resting camera position far from zero, but it
+must remain inside the calibrated `pitch_min_deg..pitch_max_deg` range. Normal
+`set` and `center` targets still keep the configured 3 degree workspace margin.
+If the startup pitch is outside the calibrated range, enable is rejected and
+the gimbal is emergency-stopped.
+
 ## Manual acceptance
 
 Support the camera and keep another terminal ready to run:

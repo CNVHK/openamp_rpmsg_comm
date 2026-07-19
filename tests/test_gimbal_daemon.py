@@ -170,24 +170,38 @@ class ServiceSafetyTests(unittest.TestCase):
             service.handle({"command": "center"})
 
     def test_unsafe_enable_is_emergency_stopped(self):
-        fake = FakeGimbal(self.active_telemetry(startup_pitch_deg=97.04))
-        service = gimbal_daemon.GimbalService(fake, 10.0, 5.0)
+        fake = FakeGimbal(self.active_telemetry(startup_pitch_deg=98.0))
+        service = gimbal_daemon.GimbalService(fake, 10.0)
         with self.assertRaises(gimbal_daemon.GimbalError):
             service.handle({"command": "enable", "confirm": True})
         self.assertEqual(fake.estop_count, 1)
 
+    def test_calibrated_resting_pitch_is_accepted(self):
+        fake = FakeGimbal(self.active_telemetry(startup_pitch_deg=97.35))
+        service = gimbal_daemon.GimbalService(fake, 10.0)
+        response = service.handle({"command": "enable", "confirm": True})
+        self.assertTrue(response["ok"])
+        self.assertEqual(fake.estop_count, 0)
+
     def test_unsafe_disable_is_rejected(self):
-        fake = FakeGimbal(self.active_telemetry(startup_pitch_deg=97.04))
-        service = gimbal_daemon.GimbalService(fake, 10.0, 5.0)
+        fake = FakeGimbal(self.active_telemetry(startup_pitch_deg=98.0))
+        service = gimbal_daemon.GimbalService(fake, 10.0)
         with self.assertRaises(gimbal_daemon.GimbalError):
             service.handle({"command": "disable", "confirm": True})
         self.assertEqual(fake.disable_count, 0)
 
     def test_shutdown_estops_when_return_position_is_unsafe(self):
-        fake = FakeGimbal(self.active_telemetry(startup_pitch_deg=97.04))
-        service = gimbal_daemon.GimbalService(fake, 10.0, 5.0)
+        fake = FakeGimbal(self.active_telemetry(startup_pitch_deg=98.0))
+        service = gimbal_daemon.GimbalService(fake, 10.0)
         service.controlled_shutdown()
         self.assertEqual(fake.estop_count, 1)
+
+    def test_shutdown_returns_to_calibrated_resting_pitch(self):
+        fake = FakeGimbal(self.active_telemetry(startup_pitch_deg=97.35))
+        service = gimbal_daemon.GimbalService(fake, 10.0)
+        service.controlled_shutdown()
+        self.assertEqual(fake.disable_count, 1)
+        self.assertEqual(fake.estop_count, 0)
 
 
 if __name__ == "__main__":
