@@ -59,6 +59,48 @@ sudo modprobe rpmsg_char
 
 5. Linux 端可参考 `linux_user/rpmsg_client.c`，从核裸机端可参考 `remote_firmware/slave_app.c`。
 
+## OpenAMP 开机自动初始化
+
+`integration/systemd/openamp-initproc.sh` 对应板端 `.bashrc` 中的 `initproc`：
+先关闭 Linux 的 CAN0/CAN1 并解绑两个 CAN 控制器，再复制从核 ELF、重启
+`remoteproc0`、绑定 `rpmsg_chrdev`，最后确认 `/dev/rpmsg0` 已创建。
+
+安装并启用服务：
+
+```bash
+sudo install -m 0755 integration/systemd/openamp-initproc.sh \
+    /usr/local/sbin/openamp-initproc
+sudo install -m 0644 integration/systemd/openamp-initproc.service \
+    /etc/systemd/system/openamp-initproc.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now openamp-initproc.service
+```
+
+上传新固件时，将新文件放到固定路径：
+
+```text
+/home/user/openamp_core0.elf
+```
+
+然后用 systemd 重新复制、启动和绑定，推荐使用：
+
+```bash
+sudo systemctl restart openamp-initproc.service
+sudo systemctl status openamp-initproc.service --no-pager
+rprun heartbeat
+```
+
+原有 shell 别名也可使用，注意准确拼写是 `reloadrproc`，不是
+`reloadproc`：
+
+```bash
+source ~/.bashrc
+reloadrproc
+```
+
+`systemctl restart` 可用于脚本、SSH 和未加载 `.bashrc` 的终端，因而更适合作为
+固件更新后的标准重载方法。
+
 ## CAN 电机控制接入
 
 电机 CAN 帧组装代码位于：
