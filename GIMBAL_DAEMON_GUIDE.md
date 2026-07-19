@@ -39,6 +39,48 @@ gimbalctl status
 
 Do not run `gimbal_test` while the daemon is active.
 
+## Apply configuration changes
+
+The daemon reads `/home/user/openamp_rpmsg_comm/gimbal.conf` only when it
+starts. It does not hot-reload this file. After changing only `gimbal.conf`,
+use the following safe sequence:
+
+```bash
+gimbalctl disable --confirm
+sleep 5
+gimbalctl status
+
+sudo systemctl restart gimbal-daemon.service
+sudo systemctl status gimbal-daemon.service --no-pager -l
+gimbalctl status
+```
+
+Support the camera, verify that the reported limits and configuration are
+correct, and then enable motion again:
+
+```bash
+gimbalctl enable --confirm
+```
+
+If the service does not start, inspect the configuration or validation error:
+
+```bash
+sudo journalctl -u gimbal-daemon.service -n 50 --no-pager
+```
+
+An invalid, incomplete, duplicated, or unknown configuration field makes the
+daemon fail at startup. Fix `gimbal.conf` and restart the service again.
+
+Changing only `gimbal.conf` does **not** require `make`, `makeelf`,
+`reloadrproc`, or `systemctl daemon-reload`. These configuration values belong
+to the Linux gimbal daemon and do not change the motor driver's PID settings.
+Use `systemctl daemon-reload` only after changing the systemd unit file, and
+use `reloadrproc` only after installing a new remote-core firmware image.
+
+Current limitation: `set` and `center` still command a fixed movement speed of
+5 rpm. `move_torque_percent` is applied after a daemon restart, but
+`move_speed_rpm` does not yet affect those two commands.
+
 ## Manual acceptance
 
 Support the camera and keep another terminal ready to run:
