@@ -13,6 +13,7 @@ $(BUILD_DIR):
 test: $(BUILD_DIR) $(BUILD_DIR)/test_protocol $(BUILD_DIR)/test_motor_can \
 	$(BUILD_DIR)/test_motor_balance_protocol $(BUILD_DIR)/test_lqr_controller \
 	$(BUILD_DIR)/test_gimbal_controller $(BUILD_DIR)/test_servo_motion_controller \
+	$(BUILD_DIR)/test_leg_joint_mapping $(BUILD_DIR)/test_leg_kinematics \
 	$(BUILD_DIR)/rpmsg-broker test-python
 
 test-python: $(BUILD_DIR)/rpmsg-broker
@@ -55,10 +56,16 @@ $(BUILD_DIR)/test_gimbal_controller: remote_firmware/gimbal_controller.c remote_
 $(BUILD_DIR)/test_servo_motion_controller: remote_firmware/servo_motion_controller.c remote_firmware/servo_motion_controller.h remote_firmware/phytium_servo_port.h tests/servo_motion_controller_test.c tests/stubs/fgeneric_timer.h
 	$(CC) $(CFLAGS) -I./tests/stubs -I./remote_firmware $(filter %.c,$^) -o $@
 
+$(BUILD_DIR)/test_leg_joint_mapping: src/leg_joint_mapping.c src/leg_joint_mapping.h tests/leg_joint_mapping_test.c
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@
+
+$(BUILD_DIR)/test_leg_kinematics: src/leg_kinematics.c src/leg_kinematics.h tests/leg_kinematics_test.c
+	$(CC) $(CFLAGS) $(filter %.c,$^) -lm -o $@
+
 $(BUILD_DIR)/gimbal_test: src/rpmsg_protocol.c src/rpmsg_protocol.h src/rpmsg_transport.c src/rpmsg_transport.h linux_user/gimbal_test.c
 	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@
 
-$(BUILD_DIR)/rpmsg_client: src/rpmsg_protocol.c src/rpmsg_protocol.h src/rpmsg_transport.c src/rpmsg_transport.h linux_user/rpmsg_client.c
+$(BUILD_DIR)/rpmsg_client: src/rpmsg_protocol.c src/rpmsg_protocol.h src/rpmsg_transport.c src/rpmsg_transport.h src/leg_joint_mapping.c src/leg_joint_mapping.h linux_user/rpmsg_client.c
 	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@
 
 $(BUILD_DIR)/balance_logger: src/rpmsg_protocol.c src/rpmsg_protocol.h src/rpmsg_transport.c src/rpmsg_transport.h linux_user/balance_logger.c

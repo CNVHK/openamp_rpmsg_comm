@@ -1,5 +1,6 @@
 #include "../src/rpmsg_protocol.h"
 #include "../src/rpmsg_transport.h"
+#include "../src/leg_joint_mapping.h"
 
 #include <fcntl.h>
 #include <math.h>
@@ -10,7 +11,7 @@
 #include <sys/select.h>
 #include <unistd.h>
 
-#define RPMSG_CLIENT_VERSION "0.19.0-leg-servo-roll"
+#define RPMSG_CLIENT_VERSION "0.19.1-leg-joint-mapping"
 #define RAD_PER_DEG 0.017453292519943295f
 
 static int wait_readable(int fd, int timeout_ms)
@@ -125,6 +126,7 @@ static void usage(const char *prog)
     printf("  %s <rpmsg_dev> servopol <0..7>\n", prog);
     printf("  %s <rpmsg_dev> servocenter\n", prog);
     printf("  %s <rpmsg_dev> servo-move <duration_ms> <s0_deg> <s1_deg> <s2_deg> <s3_deg>\n", prog);
+    printf("  %s <rpmsg_dev> leg-joints <duration_ms> <right_front_deg> <right_rear_deg> <left_front_deg> <left_rear_deg>\n", prog);
     printf("  %s <rpmsg_dev> servo-status\n", prog);
     printf("  %s <rpmsg_dev> servo-stop\n", prog);
     printf("  %s <rpmsg_dev> imuinit\n", prog);
@@ -152,6 +154,7 @@ static void usage(const char *prog)
     printf("  %s /dev/rpmsg0 servopol 4\n", prog);
     printf("  %s /dev/rpmsg0 servocenter\n", prog);
     printf("  %s /dev/rpmsg0 servo-move 3000 85 95 85 95\n", prog);
+    printf("  %s /dev/rpmsg0 leg-joints 3000 45 45 45 45\n", prog);
     printf("  %s /dev/rpmsg0 servo-status\n", prog);
     printf("  %s /dev/rpmsg0 servo-stop\n", prog);
     printf("  %s /dev/rpmsg0 imuinit\n", prog);
@@ -347,9 +350,11 @@ static int build_command(int argc, char **argv, uint8_t *type, uint8_t *payload,
         return 0;
     }
 
-    if (strcmp(cmd, "servo-move") == 0) {
+    if (strcmp(cmd, "servo-move") == 0 || strcmp(cmd, "leg-joints") == 0) {
         char *end = NULL;
         unsigned long duration_ms;
+        uint16_t angle_x10[LEG_JOINT_COUNT];
+        uint16_t raw_x10[LEG_JOINT_COUNT];
 
         if (argc < 8) return -1;
         duration_ms = strtoul(argv[3], &end, 0);
@@ -366,8 +371,17 @@ static int build_command(int argc, char **argv, uint8_t *type, uint8_t *payload,
                 angle < 0.0f || angle > 180.0f) {
                 return -1;
             }
-            put_be_u16(&payload[i * 2],
-                       (uint16_t)(angle * 10.0f + 0.5f));
+            angle_x10[i] = (uint16_t)(angle * 10.0f + 0.5f);
+        }
+        if (strcmp(cmd, "leg-joints") == 0) {
+            if (leg_effective_to_servo_raw_x10(angle_x10, raw_x10) != 0) {
+                return -1;
+            }
+        } else {
+            memcpy(raw_x10, angle_x10, sizeof(raw_x10));
+        }
+        for (int i = 0; i < 4; ++i) {
+            put_be_u16(&payload[i * 2], raw_x10[i]);
         }
         put_be_u16(&payload[8], (uint16_t)duration_ms);
         *type = CMD_SERVO_MOVE4;
@@ -687,6 +701,10 @@ int main(int argc, char **argv)
         };
         uint8_t status;
         uint8_t state;
+        uint16_t current_raw[LEG_JOINT_COUNT];
+        uint16_t target_raw[LEG_JOINT_COUNT];
+        uint16_t current_effective[LEG_JOINT_COUNT];
+        uint16_t target_effective[LEG_JOINT_COUNT];
 
         if (ack.type != type ||
             ack.length < SERVO_MOTION_TELEMETRY_PAYLOAD_SIZE ||
@@ -710,6 +728,22 @@ int main(int argc, char **argv)
                (double)read_be_u16(&ack.payload[18]) / 10.0,
                (double)read_be_u16(&ack.payload[20]) / 10.0,
                (double)read_be_u16(&ack.payload[22]) / 10.0);
+        for (int i = 0; i < 4; ++i) {
+            current_raw[i] = read_be_u16(&ack.payload[8 + i * 2]);
+            target_raw[i] = read_be_u16(&ack.payload[16 + i * 2]);
+        }
+        if (leg_servo_raw_to_effective_x10(current_raw, current_effective) == 0 &&
+            leg_servo_raw_to_effective_x10(target_raw, target_effective) == 0) {
+            printf("leg effective angle (RF,RR,LF,LR): current=%.1f,%.1f,%.1f,%.1f deg target=%.1f,%.1f,%.1f,%.1f deg\n",
+                   (double)current_effective[LEG_JOINT_RIGHT_FRONT] / 10.0,
+                   (double)current_effective[LEG_JOINT_RIGHT_REAR] / 10.0,
+                   (double)current_effective[LEG_JOINT_LEFT_FRONT] / 10.0,
+                   (double)current_effective[LEG_JOINT_LEFT_REAR] / 10.0,
+                   (double)target_effective[LEG_JOINT_RIGHT_FRONT] / 10.0,
+                   (double)target_effective[LEG_JOINT_RIGHT_REAR] / 10.0,
+                   (double)target_effective[LEG_JOINT_LEFT_FRONT] / 10.0,
+                   (double)target_effective[LEG_JOINT_LEFT_REAR] / 10.0);
+        }
         printf("servo pwm: pulse_us=%u,%u,%u,%u\n",
                read_be_u16(&ack.payload[24]),
                read_be_u16(&ack.payload[26]),
