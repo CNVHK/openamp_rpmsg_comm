@@ -1,4 +1,5 @@
 #include "leg_kinematics.h"
+#include "leg_robot_geometry.h"
 
 #include <assert.h>
 #include <math.h>
@@ -46,10 +47,35 @@ static void test_unreachable_and_invalid_geometry(void)
     assert(!leg_kinematics_config_valid(&config));
 }
 
+static void test_measured_reference_calibration(void)
+{
+    const float rad_to_deg = 57.29577951308232f;
+    LegKinematicsCalibration calibration;
+    LegKinematicsAngles effective;
+
+    leg_robot_get_measured_calibration(&calibration);
+    assert(leg_kinematics_calibration_valid(&calibration));
+    assert(leg_calibrated_inverse_kinematics(
+        &calibration, 0.0f, 0.140f, &effective) == 0);
+    assert(fabsf(effective.front_angle_rad * rad_to_deg - 45.0f) < 1.0e-4f);
+    assert(fabsf(effective.rear_angle_rad * rad_to_deg - 45.0f) < 1.0e-4f);
+
+    assert(leg_calibrated_inverse_kinematics(
+        &calibration, 0.0f, 0.150f, &effective) == 0);
+    assert(fabsf(effective.front_angle_rad * rad_to_deg - 49.40f) < 0.02f);
+    assert(fabsf(effective.rear_angle_rad * rad_to_deg - 49.40f) < 0.02f);
+
+    assert(leg_calibrated_inverse_kinematics(
+        &calibration, 0.005f, 0.140f, &effective) == 0);
+    assert(effective.front_angle_rad < 45.0f / rad_to_deg);
+    assert(effective.rear_angle_rad > 45.0f / rad_to_deg);
+}
+
 int main(void)
 {
     test_inverse_forward_round_trip();
     test_unreachable_and_invalid_geometry();
+    test_measured_reference_calibration();
     puts("leg_kinematics_test: PASS");
     return 0;
 }

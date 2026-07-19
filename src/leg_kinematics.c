@@ -118,3 +118,62 @@ int leg_forward_kinematics(
         (dx / distance) * half_chord;
     return 0;
 }
+
+int leg_kinematics_calibration_valid(
+    const LegKinematicsCalibration *calibration)
+{
+    LegKinematicsAngles reference_physical;
+
+    return calibration != NULL &&
+        leg_kinematics_config_valid(&calibration->geometry) &&
+        isfinite(calibration->reference_support_offset_m) &&
+        isfinite(calibration->reference_leg_height_m) &&
+        calibration->reference_leg_height_m > 0.0f &&
+        isfinite(calibration->reference_effective_angles.front_angle_rad) &&
+        isfinite(calibration->reference_effective_angles.rear_angle_rad) &&
+        (calibration->front_effective_direction == -1 ||
+         calibration->front_effective_direction == 1) &&
+        (calibration->rear_effective_direction == -1 ||
+         calibration->rear_effective_direction == 1) &&
+        leg_inverse_kinematics(
+            &calibration->geometry,
+            calibration->reference_support_offset_m,
+            calibration->reference_leg_height_m,
+            &reference_physical) == 0;
+}
+
+int leg_calibrated_inverse_kinematics(
+    const LegKinematicsCalibration *calibration,
+    float support_offset_m,
+    float leg_height_m,
+    LegKinematicsAngles *effective_angles)
+{
+    LegKinematicsAngles reference_physical;
+    LegKinematicsAngles target_physical;
+
+    if (!leg_kinematics_calibration_valid(calibration) ||
+        effective_angles == NULL ||
+        leg_inverse_kinematics(
+            &calibration->geometry,
+            calibration->reference_support_offset_m,
+            calibration->reference_leg_height_m,
+            &reference_physical) != 0 ||
+        leg_inverse_kinematics(&calibration->geometry,
+                               support_offset_m,
+                               leg_height_m,
+                               &target_physical) != 0) {
+        return -1;
+    }
+
+    effective_angles->front_angle_rad =
+        calibration->reference_effective_angles.front_angle_rad +
+        (float)calibration->front_effective_direction *
+        (target_physical.front_angle_rad -
+         reference_physical.front_angle_rad);
+    effective_angles->rear_angle_rad =
+        calibration->reference_effective_angles.rear_angle_rad +
+        (float)calibration->rear_effective_direction *
+        (target_physical.rear_angle_rad -
+         reference_physical.rear_angle_rad);
+    return 0;
+}

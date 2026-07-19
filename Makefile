@@ -59,7 +59,7 @@ $(BUILD_DIR)/test_servo_motion_controller: remote_firmware/servo_motion_controll
 $(BUILD_DIR)/test_leg_joint_mapping: src/leg_joint_mapping.c src/leg_joint_mapping.h tests/leg_joint_mapping_test.c
 	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@
 
-$(BUILD_DIR)/test_leg_kinematics: src/leg_kinematics.c src/leg_kinematics.h tests/leg_kinematics_test.c
+$(BUILD_DIR)/test_leg_kinematics: src/leg_kinematics.c src/leg_kinematics.h src/leg_robot_geometry.c src/leg_robot_geometry.h tests/leg_kinematics_test.c
 	$(CC) $(CFLAGS) $(filter %.c,$^) -lm -o $@
 
 $(BUILD_DIR)/gimbal_test: src/rpmsg_protocol.c src/rpmsg_protocol.h src/rpmsg_transport.c src/rpmsg_transport.h linux_user/gimbal_test.c
