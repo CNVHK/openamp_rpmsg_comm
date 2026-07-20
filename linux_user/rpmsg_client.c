@@ -11,7 +11,7 @@
 #include <sys/select.h>
 #include <unistd.h>
 
-#define RPMSG_CLIENT_VERSION "0.21.0-leg-safe-enable"
+#define RPMSG_CLIENT_VERSION "0.22.0-servo-single-test"
 #define RAD_PER_DEG 0.017453292519943295f
 
 static int wait_readable(int fd, int timeout_ms)
@@ -128,6 +128,7 @@ static void usage(const char *prog)
     printf("  %s <rpmsg_dev> servo-move <duration_ms> <s0_deg> <s1_deg> <s2_deg> <s3_deg>\n", prog);
     printf("  %s <rpmsg_dev> leg-joints <duration_ms> <right_front_deg> <right_rear_deg> <left_front_deg> <left_rear_deg>\n", prog);
     printf("  %s <rpmsg_dev> leg-enable CONFIRM\n", prog);
+    printf("  %s <rpmsg_dev> servo-test <1..4> <0..180_deg> <100..10000_ms> CONFIRM\n", prog);
     printf("  %s <rpmsg_dev> servo-status\n", prog);
     printf("  %s <rpmsg_dev> servo-stop  # cancel motion and disable all servo PWM outputs\n", prog);
     printf("  %s <rpmsg_dev> imuinit\n", prog);
@@ -156,6 +157,7 @@ static void usage(const char *prog)
     printf("  %s /dev/rpmsg0 servocenter CONFIRM\n", prog);
     printf("  %s /dev/rpmsg0 servo-move 3000 85 95 85 95\n", prog);
     printf("  %s /dev/rpmsg0 leg-enable CONFIRM\n", prog);
+    printf("  %s /dev/rpmsg0 servo-test 3 45 1000 CONFIRM\n", prog);
     printf("  %s /dev/rpmsg0 leg-joints 3000 43 43 43 43\n", prog);
     printf("  %s /dev/rpmsg0 servo-status\n", prog);
     printf("  %s /dev/rpmsg0 servo-stop\n", prog);
@@ -361,6 +363,34 @@ static int build_command(int argc, char **argv, uint8_t *type, uint8_t *payload,
         printf("enabling fixed safe command: effective RF,RR,LF,LR=45,45,45,45 deg; raw=45,135,45,135 deg\n");
         *type = CMD_LEG_ENABLE;
         *payload_len = 0U;
+        return 0;
+    }
+
+    if (strcmp(cmd, "servo-test") == 0) {
+        char *end = NULL;
+        unsigned long servo_number;
+        unsigned long duration_ms;
+        float angle;
+
+        if (argc != 7 || strcmp(argv[6], "CONFIRM") != 0) return -1;
+        servo_number = strtoul(argv[3], &end, 0);
+        if (end == argv[3] || *end != '\0' ||
+            servo_number < 1U || servo_number > 4U) return -1;
+        end = NULL;
+        angle = strtof(argv[4], &end);
+        if (end == argv[4] || *end != '\0' || !isfinite(angle) ||
+            angle < 0.0f || angle > 180.0f) return -1;
+        end = NULL;
+        duration_ms = strtoul(argv[5], &end, 0);
+        if (end == argv[5] || *end != '\0' ||
+            duration_ms < 100U || duration_ms > 10000U) return -1;
+        printf("WARNING: testing only raw servo %lu at %.1f deg for %lu ms; support the linkage.\n",
+               servo_number, (double)angle, duration_ms);
+        payload[0] = (uint8_t)(servo_number - 1U);
+        put_be_u16(&payload[1], (uint16_t)(angle * 10.0f + 0.5f));
+        put_be_u16(&payload[3], (uint16_t)duration_ms);
+        *type = CMD_SERVO_TEST_ONE;
+        *payload_len = 5U;
         return 0;
     }
 
@@ -719,13 +749,14 @@ int main(int argc, char **argv)
         return status == 0U ? 0 : 4;
     }
     if ((type >= CMD_SERVO_MOVE4 && type <= CMD_SERVO_STOP) ||
-        type == CMD_LEG_ENABLE || type == CMD_LEG_MOVE4) {
+        type == CMD_LEG_ENABLE || type == CMD_LEG_MOVE4 ||
+        type == CMD_SERVO_TEST_ONE) {
         static const char *const status_names[] = {
             "ok", "invalid", "busy", "balance-active", "hardware-error",
             "not-armed"
         };
         static const char *const state_names[] = {
-            "idle", "moving", "fault", "unarmed", "starting"
+            "idle", "moving", "fault", "unarmed", "starting", "testing"
         };
         uint8_t status;
         uint8_t state;
@@ -745,7 +776,7 @@ int main(int argc, char **argv)
         state = ack.payload[2];
         printf("servo motion: status=%s(%u) state=%s(%u) last_error=%d remaining=%u ms\n",
                status < 6U ? status_names[status] : "unknown", status,
-               state < 5U ? state_names[state] : "unknown", state,
+               state < 6U ? state_names[state] : "unknown", state,
                (int8_t)ack.payload[3], read_be_u32(&ack.payload[4]));
         printf("commanded angle (no position feedback): current=%.1f,%.1f,%.1f,%.1f deg target=%.1f,%.1f,%.1f,%.1f deg\n",
                (double)read_be_u16(&ack.payload[8]) / 10.0,

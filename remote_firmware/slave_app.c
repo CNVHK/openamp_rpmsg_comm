@@ -963,6 +963,20 @@ size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply,
         return build_servo_motion_ack(frame.type, frame.seq, (uint8_t)status,
                                       reply, reply_size);
     }
+    case CMD_SERVO_TEST_ONE: {
+        int status = SERVO_MOTION_INVALID;
+        if (frame.length >= 5U &&
+            balance_control_get_telemetry()->state == BALANCE_STATE_DISABLED) {
+            status = servo_motion_test_one(frame.payload[0],
+                                           read_be_u16(&frame.payload[1]),
+                                           read_be_u16(&frame.payload[3]));
+        } else if (balance_control_get_telemetry()->state !=
+                   BALANCE_STATE_DISABLED) {
+            status = SERVO_MOTION_BALANCE_ACTIVE;
+        }
+        return build_servo_motion_ack(frame.type, frame.seq, (uint8_t)status,
+                                      reply, reply_size);
+    }
     case CMD_IMU_INIT:
         handle_imu_init();
         return build_ack(frame.seq, reply, reply_size);

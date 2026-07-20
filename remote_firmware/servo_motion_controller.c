@@ -136,6 +136,40 @@ int servo_motion_start(
     return SERVO_MOTION_OK;
 }
 
+int servo_motion_test_one(uint8_t servo_id, uint16_t angle_x10_deg,
+                          uint16_t duration_ms)
+{
+    uint64_t now;
+
+    if (servo_id >= PHYTIUM_SERVO_NUM ||
+        angle_x10_deg > SERVO_MOTION_MAX_ANGLE_X10_DEG ||
+        duration_ms < SERVO_MOTION_MIN_DURATION_MS ||
+        duration_ms > SERVO_MOTION_MAX_DURATION_MS) {
+        return SERVO_MOTION_INVALID;
+    }
+    if (g_telemetry.state == SERVO_MOTION_MOVING ||
+        g_telemetry.state == SERVO_MOTION_STARTING ||
+        g_telemetry.state == SERVO_MOTION_TESTING) {
+        return SERVO_MOTION_BUSY;
+    }
+    if (phytium_servo_enable_single_x10(servo_id, angle_x10_deg) != 0) {
+        g_telemetry.state = SERVO_MOTION_FAULT;
+        g_telemetry.last_error = -2;
+        return SERVO_MOTION_HARDWARE_ERROR;
+    }
+
+    g_telemetry.current_angle_x10_deg[servo_id] = angle_x10_deg;
+    g_telemetry.target_angle_x10_deg[servo_id] = angle_x10_deg;
+    now = GenericTimerRead(GENERIC_TIMER_ID0);
+    g_start_tick = now;
+    g_duration_ms = duration_ms;
+    g_telemetry.remaining_ms = duration_ms;
+    g_telemetry.last_error = 0;
+    g_telemetry.state = SERVO_MOTION_TESTING;
+    update_debug_pulses();
+    return SERVO_MOTION_OK;
+}
+
 void servo_motion_stop(void)
 {
     if (g_telemetry.state == SERVO_MOTION_MOVING) {
@@ -157,10 +191,20 @@ void servo_motion_poll(void)
     uint32_t passed_ms;
 
     if (g_telemetry.state != SERVO_MOTION_MOVING &&
-        g_telemetry.state != SERVO_MOTION_STARTING) {
+        g_telemetry.state != SERVO_MOTION_STARTING &&
+        g_telemetry.state != SERVO_MOTION_TESTING) {
         return;
     }
     now = GenericTimerRead(GENERIC_TIMER_ID0);
+    if (g_telemetry.state == SERVO_MOTION_TESTING) {
+        passed_ms = elapsed_ms(now);
+        if (passed_ms >= g_duration_ms) {
+            servo_motion_stop();
+        } else {
+            g_telemetry.remaining_ms = g_duration_ms - passed_ms;
+        }
+        return;
+    }
     if (g_telemetry.state == SERVO_MOTION_STARTING) {
         passed_ms = elapsed_ms(now);
         if (passed_ms >= g_duration_ms) {

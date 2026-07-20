@@ -9,6 +9,8 @@
 static uint64_t g_now;
 static unsigned int g_write_count;
 static unsigned int g_disable_count;
+static unsigned int g_single_write_count;
+static uint8_t g_single_servo_id;
 static PhytiumServoDebugState g_debug;
 
 uint64_t GenericTimerRead(uint32_t timer_id)
@@ -40,6 +42,21 @@ int phytium_servo_set_all_x10(
     return 0;
 }
 
+int phytium_servo_enable_single_x10(uint8_t servo_id,
+                                    uint16_t angle_x10_deg)
+{
+    ++g_single_write_count;
+    g_single_servo_id = servo_id;
+    for (uint8_t i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
+        g_debug.pulse_us[i] = 0U;
+    }
+    g_debug.angle_x10_deg[servo_id] = angle_x10_deg;
+    g_debug.angle_deg[servo_id] = angle_x10_deg / 10U;
+    g_debug.pulse_us[servo_id] = (uint16_t)(500U +
+        (2000U * angle_x10_deg) / 1800U);
+    return 0;
+}
+
 void phytium_servo_disable_outputs(void)
 {
     ++g_disable_count;
@@ -59,6 +76,8 @@ static void reset_fixture(void)
     g_now = 1000U;
     g_write_count = 0U;
     g_disable_count = 0U;
+    g_single_write_count = 0U;
+    g_single_servo_id = 0xffU;
     for (uint8_t i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
         static const uint16_t safe_raw[PHYTIUM_SERVO_NUM] = {
             450U, 1350U, 450U, 1350U
@@ -141,10 +160,41 @@ static void test_validation_and_stop(void)
     }
 }
 
+static void test_single_servo_timeout(void)
+{
+    const ServoMotionTelemetry *telemetry;
+
+    reset_fixture();
+    assert(servo_motion_test_one(4U, 450U, 1000U) == SERVO_MOTION_INVALID);
+    assert(servo_motion_test_one(2U, 1801U, 1000U) == SERVO_MOTION_INVALID);
+    assert(servo_motion_test_one(2U, 450U, 99U) == SERVO_MOTION_INVALID);
+    assert(servo_motion_test_one(2U, 450U, 1000U) == SERVO_MOTION_OK);
+    assert(g_single_write_count == 1U);
+    assert(g_single_servo_id == 2U);
+    telemetry = servo_motion_get_telemetry();
+    assert(telemetry->state == SERVO_MOTION_TESTING);
+    assert(telemetry->pulse_us[0] == 0U);
+    assert(telemetry->pulse_us[1] == 0U);
+    assert(telemetry->pulse_us[2] == 1000U);
+    assert(telemetry->pulse_us[3] == 0U);
+    advance_ms(999U);
+    servo_motion_poll();
+    assert(servo_motion_get_telemetry()->state == SERVO_MOTION_TESTING);
+    assert(servo_motion_get_telemetry()->remaining_ms == 1U);
+    advance_ms(1U);
+    servo_motion_poll();
+    assert(servo_motion_get_telemetry()->state == SERVO_MOTION_UNARMED);
+    assert(g_disable_count == 1U);
+    for (uint8_t i = 0; i < PHYTIUM_SERVO_NUM; ++i) {
+        assert(servo_motion_get_telemetry()->pulse_us[i] == 0U);
+    }
+}
+
 int main(void)
 {
     test_synchronized_interpolation();
     test_validation_and_stop();
+    test_single_servo_timeout();
     puts("servo_motion_controller_test: PASS");
     return 0;
 }

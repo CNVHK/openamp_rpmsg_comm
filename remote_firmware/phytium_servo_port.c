@@ -346,6 +346,47 @@ int phytium_servo_set_all_x10(
     return ret;
 }
 
+int phytium_servo_enable_single_x10(uint8_t servo_id,
+                                    uint16_t angle_x10_deg)
+{
+    const ServoPwmMap *map;
+    uint16_t pulse_us;
+    FError ret;
+
+    if (servo_id >= PHYTIUM_SERVO_NUM ||
+        angle_x10_deg > SERVO_MAX_ANGLE_X10_DEG) {
+        g_servo_debug.last_ret = -1;
+        return -1;
+    }
+    if (!g_servo_ready && phytium_servo_init() != 0) {
+        g_servo_debug.last_ret = -2;
+        return -2;
+    }
+
+    /* A commissioning test must never leave another linkage energized. */
+    phytium_servo_disable_outputs();
+    map = &g_servo_map[servo_id];
+    pulse_us = servo_angle_x10_to_pulse_us(angle_x10_deg);
+    if (map->enabled) {
+        ret = FPwmPulseSet(&g_pwm_ctrl[map->pwm_id], map->channel,
+                           servo_pulse_to_ccr_us(pulse_us));
+        if (ret != FPWM_SUCCESS) {
+            g_servo_debug.last_ret = -3;
+            return -3;
+        }
+        FPwmEnable(&g_pwm_ctrl[map->pwm_id], map->channel);
+    }
+    g_servo_outputs_enabled = 1;
+    g_servo_debug.angle_deg[servo_id] = angle_x10_deg / 10U;
+    g_servo_debug.angle_x10_deg[servo_id] = angle_x10_deg;
+    g_servo_debug.pulse_us[servo_id] = pulse_us;
+    g_servo_debug.last_servo_id = servo_id;
+    g_servo_debug.last_pwm_id = (uint8_t)map->pwm_id;
+    g_servo_debug.last_channel = (uint8_t)map->channel;
+    g_servo_debug.last_ret = 0;
+    return 0;
+}
+
 void phytium_servo_disable_outputs(void)
 {
     if (g_servo_ready && g_servo_outputs_enabled) {

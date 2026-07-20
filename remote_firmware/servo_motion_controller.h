@@ -10,7 +10,8 @@ typedef enum {
     SERVO_MOTION_MOVING = 1,
     SERVO_MOTION_FAULT = 2,
     SERVO_MOTION_UNARMED = 3,
-    SERVO_MOTION_STARTING = 4
+    SERVO_MOTION_STARTING = 4,
+    SERVO_MOTION_TESTING = 5
 } ServoMotionState;
 
 enum {
@@ -37,6 +38,8 @@ int servo_motion_enable_at_target(
 int servo_motion_start(
     const uint16_t target_angle_x10_deg[PHYTIUM_SERVO_NUM],
     uint16_t duration_ms);
+int servo_motion_test_one(uint8_t servo_id, uint16_t angle_x10_deg,
+                          uint16_t duration_ms);
 void servo_motion_stop(void);
 void servo_motion_poll(void);
 const ServoMotionTelemetry *servo_motion_get_telemetry(void);
