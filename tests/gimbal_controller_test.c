@@ -312,9 +312,39 @@ static void test_motion_timeout(void)
            GIMBAL_STATUS_OK);
     advance_ms(2500U);
     gimbal_control_poll();
+    assert(gimbal_control_get_telemetry()->state == GIMBAL_STATE_ACTIVE);
+    advance_ms(2501U);
+    gimbal_control_poll();
     assert(gimbal_control_get_telemetry()->state == GIMBAL_STATE_FAULT);
     assert((gimbal_control_get_telemetry()->fault &
             GIMBAL_FAULT_MOTION_TIMEOUT) != 0U);
+}
+
+static void test_dual_axis_near_target_has_time_to_settle(void)
+{
+    GimbalLimits limits = test_limits();
+
+    g_now = 1000U;
+    g_sent_count = 0U;
+    assert(gimbal_control_init() == 0);
+    set_feedback(0, 0, 0, 0);
+    assert(gimbal_control_set_limits(&limits) == GIMBAL_STATUS_OK);
+    start_and_finish_homing(10U);
+    assert(gimbal_control_set_target(1000, 1000, 20U, 10U, 0U) ==
+           GIMBAL_STATUS_OK);
+
+    /* The old ~2.08 s deadline faulted here even though both axes were close. */
+    advance_ms(2100U);
+    set_feedback(853, 936, 0, 0);
+    gimbal_control_poll();
+    assert(gimbal_control_get_telemetry()->state == GIMBAL_STATE_ACTIVE);
+    assert(gimbal_control_get_telemetry()->fault == GIMBAL_FAULT_NONE);
+
+    advance_ms(1000U);
+    set_feedback(950, 960, 0, 0);
+    gimbal_control_poll();
+    assert(gimbal_control_get_telemetry()->state == GIMBAL_STATE_ACTIVE);
+    assert(gimbal_control_get_telemetry()->fault == GIMBAL_FAULT_NONE);
 }
 
 int main(void)
@@ -327,6 +357,7 @@ int main(void)
     test_position_command_refresh();
     test_controlled_disable();
     test_motion_timeout();
+    test_dual_axis_near_target_has_time_to_settle();
     puts("gimbal_controller_test: PASS");
     return 0;
 }

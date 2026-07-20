@@ -24,6 +24,7 @@
 #define GIMBAL_LIMIT_OVERSHOOT_X100_DEG 100
 #define GIMBAL_TARGET_TOLERANCE_X100_DEG 100
 #define GIMBAL_MOTION_SETTLE_MARGIN_MS 2000U
+#define GIMBAL_MOTION_TIMEOUT_MIN_MS 5000U
 #define GIMBAL_MOTION_TIMEOUT_MAX_MS 15000U
 #define GIMBAL_STOP_STEP_MS 100U
 #define GIMBAL_STOP_TORQUE_STEP_PERCENT 2U
@@ -195,6 +196,9 @@ static void set_motion_deadline(uint64_t now, int32_t yaw_target_x100_deg,
     }
     travel_ms = max_error * 1000U / ((uint32_t)speed_rpm * 600U);
     travel_ms += GIMBAL_MOTION_SETTLE_MARGIN_MS;
+    if (travel_ms < GIMBAL_MOTION_TIMEOUT_MIN_MS) {
+        travel_ms = GIMBAL_MOTION_TIMEOUT_MIN_MS;
+    }
     if (travel_ms > GIMBAL_MOTION_TIMEOUT_MAX_MS) {
         travel_ms = GIMBAL_MOTION_TIMEOUT_MAX_MS;
     }

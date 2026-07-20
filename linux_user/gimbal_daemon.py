@@ -452,9 +452,15 @@ def serve(args: argparse.Namespace) -> int:
                 continue
             with connection:
                 try:
-                    send_json(connection, service.handle(receive_json(connection)))
+                    response = service.handle(receive_json(connection))
                 except Exception as error:
-                    send_json(connection, {"ok": False, "error": str(error)})
+                    response = {"ok": False, "error": str(error)}
+                try:
+                    send_json(connection, response)
+                except (BrokenPipeError, ConnectionResetError):
+                    # A command may legitimately outlive its requester.  A stale
+                    # local client must never terminate the safety daemon.
+                    continue
     finally:
         try:
             service.controlled_shutdown()
