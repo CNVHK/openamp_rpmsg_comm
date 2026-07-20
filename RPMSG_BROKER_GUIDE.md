@@ -13,11 +13,17 @@ rpmsg-broker
     +-- balance_logger / rplog
     +-- gimbal-daemon
     +-- gimbal_test
+    |
+    +-- monitor.sock（只读广播）-- rpmsg-monitor -- 浏览器 :8092
 ```
 
 Broker 使用 `/run/rpmsg-broker/rpmsg.sock` 接收完整 RPMsg 协议帧，给每个
 从核事务重新分配 sequence，串行执行设备读写，再把原客户端 sequence 写回
 响应。多个 Linux 程序可以同时使用协议，不会互相取走回复。
+
+`/run/rpmsg-broker/monitor.sock` 是独立的只读 `SOCK_SEQPACKET` 旁路。它广播
+主核 TX、从核 RX、超时、校验失败、序号不匹配、帧长度、原始十六进制数据和累计计数。
+监视客户端不能通过该 socket 向从核发送命令；慢客户端使用非阻塞发送，绝不会阻塞控制事务。
 
 ## 2. 安装
 
@@ -27,9 +33,11 @@ Broker 使用 `/run/rpmsg-broker/rpmsg.sock` 接收完整 RPMsg 协议帧，给�
 cd /home/user/openamp_rpmsg_comm
 make broker client logger gimbal
 sudo make install-rpmsg-broker
+sudo make install-rpmsg-monitor
 sudo make install-gimbal-daemon
 sudo systemctl daemon-reload
 sudo systemctl enable --now rpmsg-broker.service
+sudo systemctl enable --now rpmsg-monitor.service
 sudo systemctl enable --now gimbal-daemon.service
 ```
 
@@ -38,10 +46,14 @@ sudo systemctl enable --now gimbal-daemon.service
 ```bash
 sudo systemctl status rpmsg-broker.service --no-pager -l
 sudo systemctl status gimbal-daemon.service --no-pager -l
+sudo systemctl status rpmsg-monitor.service --no-pager -l
 sudo lsof /dev/rpmsg0
 ```
 
 `lsof` 中应只有 `rpmsg-broker` 持有 `/dev/rpmsg0`。
+
+浏览器访问 `http://<飞腾派IP>:8092/`。机器人主仪表盘也可用 iframe 将该地址
+作为“主从通信”页签；页面通过 SSE 接收数据，不轮询 `/dev/rpmsg0`。
 
 ## 3. 日常命令
 
@@ -94,6 +106,8 @@ rprun heartbeat
 sudo journalctl -u rpmsg-broker.service -n 100 --no-pager
 sudo journalctl -u gimbal-daemon.service -n 100 --no-pager
 ls -l /run/rpmsg-broker/rpmsg.sock
+ls -l /run/rpmsg-broker/monitor.sock
+curl http://127.0.0.1:8092/api/health
 sudo lsof /dev/rpmsg0
 ```
 

@@ -3,7 +3,7 @@ CFLAGS ?= -std=c99 -Wall -Wextra -I./src
 PYTHON ?= python3
 BUILD_DIR := build
 
-.PHONY: all test test-python client logger gimbal broker firmware-elf install-rpmsg-broker install-gimbal-daemon clean
+.PHONY: all test test-python client logger gimbal broker firmware-elf install-rpmsg-broker install-rpmsg-monitor install-gimbal-daemon clean
 
 all: test client logger gimbal broker
 
@@ -17,7 +17,7 @@ test: $(BUILD_DIR) $(BUILD_DIR)/test_protocol $(BUILD_DIR)/test_motor_can \
 	$(BUILD_DIR)/rpmsg-broker test-python
 
 test-python: $(BUILD_DIR)/rpmsg-broker
-	$(PYTHON) -m unittest tests/test_gimbal_daemon.py tests/test_rpmsg_broker.py
+	$(PYTHON) -m unittest tests/test_gimbal_daemon.py tests/test_rpmsg_broker.py tests/test_rpmsg_monitor.py
 
 client: $(BUILD_DIR) $(BUILD_DIR)/rpmsg_client
 
@@ -34,6 +34,12 @@ install-rpmsg-broker: $(BUILD_DIR)/rpmsg-broker
 	install -d -m 0755 /usr/local/sbin
 	install -m 0755 $(BUILD_DIR)/rpmsg-broker /usr/local/sbin/rpmsg-broker
 	install -m 0644 integration/systemd/rpmsg-broker.service /etc/systemd/system/rpmsg-broker.service
+
+install-rpmsg-monitor:
+	install -d -m 0755 /usr/local/libexec /usr/local/share/rpmsg-monitor
+	install -m 0755 linux_user/rpmsg_monitor.py /usr/local/libexec/rpmsg-monitor
+	install -m 0644 linux_user/rpmsg_monitor.html /usr/local/share/rpmsg-monitor/index.html
+	install -m 0644 integration/systemd/rpmsg-monitor.service /etc/systemd/system/rpmsg-monitor.service
 
 install-gimbal-daemon:
 	install -d -m 0755 /usr/local/libexec

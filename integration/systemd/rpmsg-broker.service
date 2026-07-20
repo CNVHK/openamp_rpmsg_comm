@@ -10,7 +10,7 @@ User=root
 Group=user
 RuntimeDirectory=rpmsg-broker
 RuntimeDirectoryMode=0750
-ExecStart=/usr/local/sbin/rpmsg-broker --device /dev/rpmsg0 --socket /run/rpmsg-broker/rpmsg.sock
+ExecStart=/usr/local/sbin/rpmsg-broker --device /dev/rpmsg0 --socket /run/rpmsg-broker/rpmsg.sock --monitor-socket /run/rpmsg-broker/monitor.sock
 Restart=on-failure
 RestartSec=1
 

@@ -1,4 +1,5 @@
 import os
+import json
 from pathlib import Path
 import pty
 import select
@@ -36,19 +37,22 @@ class BrokerIntegrationTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
         self.socket_path = str(Path(self.tempdir.name) / "rpmsg.sock")
+        self.monitor_socket_path = str(Path(self.tempdir.name) / "monitor.sock")
         self.master_fd, slave_fd = pty.openpty()
         tty.setraw(slave_fd)
         device_path = os.ttyname(slave_fd)
         self.process = subprocess.Popen(
             [str(BROKER), "--device", device_path,
-             "--socket", self.socket_path],
+             "--socket", self.socket_path,
+             "--monitor-socket", self.monitor_socket_path],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
         )
         os.close(slave_fd)
         deadline = time.monotonic() + 2.0
-        while not Path(self.socket_path).exists():
+        while (not Path(self.socket_path).exists() or
+               not Path(self.monitor_socket_path).exists()):
             if self.process.poll() is not None:
                 stdout, stderr = self.process.communicate()
                 self.fail(f"broker exited: {stdout} {stderr}")
@@ -113,6 +117,35 @@ class BrokerIntegrationTests(unittest.TestCase):
         self.assertEqual(results[1], (41, 11, b")"))
         for client in clients:
             client.close()
+
+    def test_monitor_observes_wire_frames_without_sending_requests(self):
+        monitor = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+        monitor.settimeout(1.0)
+        monitor.connect(self.monitor_socket_path)
+        time.sleep(0.05)
+
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+        client.connect(self.socket_path)
+        client.send(encode(52, 91))
+        command, broker_sequence, _ = decode(os.read(self.master_fd, 128))
+        self.assertEqual(command, 52)
+        tx_event = json.loads(monitor.recv(2048))
+        self.assertEqual(tx_event["direction"], "tx")
+        self.assertEqual(tx_event["type"], 52)
+        self.assertEqual(tx_event["client_seq"], 91)
+        self.assertEqual(tx_event["wire_seq"], broker_sequence)
+
+        os.write(self.master_fd, encode(58, broker_sequence, b"telemetry"))
+        decode(client.recv(128))
+        rx_event = json.loads(monitor.recv(2048))
+        self.assertEqual(rx_event["direction"], "rx")
+        self.assertEqual(rx_event["type"], 58)
+        self.assertEqual(rx_event["client_seq"], 91)
+        self.assertGreaterEqual(rx_event["latency_ms"], 0)
+        self.assertEqual(rx_event["totals"]["tx_frames"], 1)
+        self.assertEqual(rx_event["totals"]["rx_frames"], 1)
+        client.close()
+        monitor.close()
 
 
 if __name__ == "__main__":
