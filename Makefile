@@ -3,7 +3,7 @@ CFLAGS ?= -std=c99 -Wall -Wextra -I./src
 PYTHON ?= python3
 BUILD_DIR := build
 
-.PHONY: all test test-python client logger gimbal broker firmware-elf install-rpmsg-broker install-rpmsg-monitor install-gimbal-daemon install-gimbal-tf-state clean
+.PHONY: all test test-python test-ros-python client logger gimbal broker firmware-elf install-rpmsg-broker install-rpmsg-monitor install-gimbal-daemon install-gimbal-tf-state clean
 
 all: test client logger gimbal broker
 
@@ -18,6 +18,8 @@ test: $(BUILD_DIR) $(BUILD_DIR)/test_protocol $(BUILD_DIR)/test_motor_can \
 
 test-python: $(BUILD_DIR)/rpmsg-broker
 	$(PYTHON) -m unittest tests/test_gimbal_daemon.py tests/test_gimbal_tf_state_bridge.py tests/test_rpmsg_broker.py tests/test_rpmsg_monitor.py
+
+test-ros-python:
 	PYTHONPATH=ros2/gimbal_camera_tf_ros2:$${PYTHONPATH} $(PYTHON) -m unittest discover -s ros2/gimbal_camera_tf_ros2/test -p 'test_*.py'
 
 client: $(BUILD_DIR) $(BUILD_DIR)/rpmsg_client
