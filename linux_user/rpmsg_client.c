@@ -11,7 +11,7 @@
 #include <sys/select.h>
 #include <unistd.h>
 
-#define RPMSG_CLIENT_VERSION "0.22.0-servo-single-test"
+#define RPMSG_CLIENT_VERSION "0.23.0-chassis-motion"
 #define RAD_PER_DEG 0.017453292519943295f
 
 static int wait_readable(int fd, int timeout_ms)
@@ -146,6 +146,9 @@ static void usage(const char *prog)
     printf("  %s <rpmsg_dev> balance-filter <5..40_hz>\n", prog);
     printf("  %s <rpmsg_dev> balance-posture-angle <1..10_deg>\n", prog);
     printf("  %s <rpmsg_dev> balance-torque-limit <0.05..0.30_nm>\n", prog);
+    printf("  %s <rpmsg_dev> chassis-track <0.08..0.50_m>\n", prog);
+    printf("  %s <rpmsg_dev> chassis-velocity <-0.4..0.4_m_s> <-1..1_rad_s> [100..1000_timeout_ms]\n", prog);
+    printf("  %s <rpmsg_dev> chassis-status\n", prog);
     printf("  %s <rpmsg_dev> pvt <motor_id> <pos_x100_deg> <speed_rpm> <torque_percent>\n", prog);
     printf("  %s <rpmsg_dev> stop [motor_id]\n", prog);
     printf("\nExamples:\n");
@@ -175,6 +178,9 @@ static void usage(const char *prog)
     printf("  %s /dev/rpmsg0 balance-filter 20\n", prog);
     printf("  %s /dev/rpmsg0 balance-posture-angle 3\n", prog);
     printf("  %s /dev/rpmsg0 balance-torque-limit 0.22\n", prog);
+    printf("  %s /dev/rpmsg0 chassis-track 0.18\n", prog);
+    printf("  %s /dev/rpmsg0 chassis-velocity 0.10 0.0 300\n", prog);
+    printf("  %s /dev/rpmsg0 chassis-status\n", prog);
     printf("  %s /dev/rpmsg0 enable 1\n", prog);
     printf("  %s /dev/rpmsg0 pvt 1 1000 100 20\n", prog);
     printf("  %s /dev/rpmsg0 stop 1\n", prog);
@@ -623,6 +629,54 @@ static int build_command(int argc, char **argv, uint8_t *type, uint8_t *payload,
         return 0;
     }
 
+    if (strcmp(cmd, "chassis-track") == 0) {
+        char *end = NULL;
+        float wheel_track_m;
+
+        if (argc != 4) return -1;
+        wheel_track_m = strtof(argv[3], &end);
+        if (end == argv[3] || *end != '\0' || !isfinite(wheel_track_m) ||
+            wheel_track_m < 0.08f || wheel_track_m > 0.50f) return -1;
+        *type = CMD_CHASSIS_SET_TRACK_WIDTH;
+        put_be_i32(payload, scaled_i32(wheel_track_m, 1000000.0f));
+        *payload_len = 4U;
+        return 0;
+    }
+
+    if (strcmp(cmd, "chassis-velocity") == 0) {
+        char *end = NULL;
+        float linear_m_s;
+        float angular_rad_s;
+        unsigned long timeout_ms = 300U;
+
+        if (argc != 5 && argc != 6) return -1;
+        linear_m_s = strtof(argv[3], &end);
+        if (end == argv[3] || *end != '\0' || !isfinite(linear_m_s) ||
+            linear_m_s < -0.40f || linear_m_s > 0.40f) return -1;
+        end = NULL;
+        angular_rad_s = strtof(argv[4], &end);
+        if (end == argv[4] || *end != '\0' || !isfinite(angular_rad_s) ||
+            angular_rad_s < -1.0f || angular_rad_s > 1.0f) return -1;
+        if (argc == 6) {
+            end = NULL;
+            timeout_ms = strtoul(argv[5], &end, 0);
+            if (end == argv[5] || *end != '\0' ||
+                timeout_ms < 100U || timeout_ms > 1000U) return -1;
+        }
+        *type = CMD_CHASSIS_SET_VELOCITY;
+        put_be_i32(&payload[0], scaled_i32(linear_m_s, 1000000.0f));
+        put_be_i32(&payload[4], scaled_i32(angular_rad_s, 1000000.0f));
+        put_be_u16(&payload[8], (uint16_t)timeout_ms);
+        *payload_len = 10U;
+        return 0;
+    }
+
+    if (strcmp(cmd, "chassis-status") == 0) {
+        *type = CMD_CHASSIS_STATUS;
+        *payload_len = 0U;
+        return 0;
+    }
+
     if (strcmp(cmd, "pvt") == 0) {
         if (argc < 7) return -1;
         *type = CMD_CAN_PVT;
@@ -839,6 +893,39 @@ int main(int argc, char **argv)
                (double)read_be_i32(&ack.payload[16]) / 1000000.0);
         printf("imu scaled: accel=%.4f,%.4f,%.4f m/s^2 gyro=%.4f,%.4f,%.4f rad/s\n",
                (double)read_be_i32(&ack.payload[20]) / 1000000.0,
+               (double)read_be_i32(&ack.payload[24]) / 1000000.0,
+               (double)read_be_i32(&ack.payload[28]) / 1000000.0,
+               (double)read_be_i32(&ack.payload[32]) / 1000000.0,
+               (double)read_be_i32(&ack.payload[36]) / 1000000.0,
+               (double)read_be_i32(&ack.payload[40]) / 1000000.0);
+        close(fd);
+        return status == 0U ? 0 : 4;
+    }
+    if (type == CMD_CHASSIS_SET_VELOCITY ||
+        type == CMD_CHASSIS_STATUS ||
+        type == CMD_CHASSIS_SET_TRACK_WIDTH) {
+        static const char *const status_names[] = {
+            "ok", "invalid", "unavailable"
+        };
+        uint8_t status;
+
+        if (ack.type != type ||
+            ack.length < CHASSIS_TELEMETRY_PAYLOAD_SIZE ||
+            ack.payload[0] != CHASSIS_TELEMETRY_VERSION) {
+            printf("invalid chassis telemetry reply\n");
+            close(fd);
+            return 3;
+        }
+        status = ack.payload[1];
+        printf("chassis: status=%s(%u) balance_state=%u fault=0x%02x command_age_ms=%u\n",
+               status < 3U ? status_names[status] : "unknown", status,
+               ack.payload[2], ack.payload[3], read_be_u32(&ack.payload[4]));
+        printf("target: linear=%.4f m/s angular=%.4f rad/s; applied=%.4f m/s %.4f rad/s\n",
+               (double)read_be_i32(&ack.payload[8]) / 1000000.0,
+               (double)read_be_i32(&ack.payload[12]) / 1000000.0,
+               (double)read_be_i32(&ack.payload[16]) / 1000000.0,
+               (double)read_be_i32(&ack.payload[20]) / 1000000.0);
+        printf("measured: linear=%.4f m/s angular=%.4f rad/s position=%.4f m yaw=%.4f rad track=%.4f m\n",
                (double)read_be_i32(&ack.payload[24]) / 1000000.0,
                (double)read_be_i32(&ack.payload[28]) / 1000000.0,
                (double)read_be_i32(&ack.payload[32]) / 1000000.0,

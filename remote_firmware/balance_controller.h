@@ -24,6 +24,12 @@ enum {
     BALANCE_FAULT_CONFIG = BALANCE_FAULT_SPEED
 };
 
+enum {
+    BALANCE_MOTION_OK = 0,
+    BALANCE_MOTION_INVALID = 1,
+    BALANCE_MOTION_NOT_ACTIVE = 2
+};
+
 typedef struct {
     uint8_t state;
     uint8_t fault;
@@ -50,6 +56,19 @@ typedef struct {
     float torque_limit_nm;
 } BalanceRuntimeConfig;
 
+typedef struct {
+    float target_linear_m_s;
+    float target_angular_rad_s;
+    float applied_linear_m_s;
+    float applied_angular_rad_s;
+    float measured_linear_m_s;
+    float measured_angular_rad_s;
+    float wheel_position_m;
+    float yaw_position_rad;
+    float wheel_track_m;
+    uint32_t command_age_ms;
+} BalanceMotionTelemetry;
+
 enum {
     BALANCE_CONFIG_OK = 0,
     BALANCE_CONFIG_INVALID = 1,
@@ -70,5 +89,9 @@ int balance_control_set_speed_limit(float max_wheel_speed_m_s);
 int balance_control_set_pitch_rate_filter(float cutoff_hz);
 int balance_control_set_posture_priority(float angle_rad);
 int balance_control_set_torque_limit(float torque_limit_nm);
+int balance_control_set_motion_command(float linear_m_s, float angular_rad_s,
+                                       uint16_t timeout_ms);
+int balance_control_set_wheel_track(float wheel_track_m);
+void balance_control_get_motion_telemetry(BalanceMotionTelemetry *telemetry);
 
 #endif

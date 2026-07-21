@@ -35,6 +35,16 @@
 #define BALANCE_MIN_TORQUE_LIMIT_NM 0.05f
 #define BALANCE_MAX_TORQUE_LIMIT_NM 0.30f
 #define BALANCE_MAX_PITCH_TRIM_RAD (5.0f * BALANCE_PI / 180.0f)
+#define BALANCE_MAX_COMMAND_LINEAR_M_S 0.40f
+#define BALANCE_MAX_COMMAND_ANGULAR_RAD_S 1.0f
+#define BALANCE_LINEAR_ACCEL_LIMIT_M_S2 0.50f
+#define BALANCE_ANGULAR_ACCEL_LIMIT_RAD_S2 2.0f
+#define BALANCE_MIN_COMMAND_TIMEOUT_MS 100U
+#define BALANCE_MAX_COMMAND_TIMEOUT_MS 1000U
+#define BALANCE_MIN_WHEEL_TRACK_M 0.08f
+#define BALANCE_MAX_WHEEL_TRACK_M 0.50f
+#define BALANCE_YAW_RATE_KP_NM_PER_RAD_S 0.04f
+#define BALANCE_MAX_YAW_TORQUE_NM 0.05f
 
 static LqrController g_lqr;
 static BalanceTelemetry g_telemetry;
@@ -46,6 +56,10 @@ static float g_max_wheel_speed_m_s = BALANCE_DEFAULT_MAX_WHEEL_SPEED_M_S;
 static float g_pitch_rate_filter_hz = BALANCE_DEFAULT_PITCH_RATE_FILTER_HZ;
 static float g_filtered_pitch_rate_rad_s;
 static uint8_t g_pitch_rate_filter_valid;
+static BalanceMotionTelemetry g_motion;
+static uint64_t g_motion_command_tick;
+static uint64_t g_motion_timeout_ticks;
+static uint8_t g_motion_command_valid;
 
 static const LqrConfig g_default_lqr_config = {
     /* 100 Hz discrete LQR; input is tau_left + tau_right in N*m. */
@@ -72,6 +86,42 @@ static uint8_t g_initialized;
 static uint64_t ms_to_ticks(uint32_t milliseconds)
 {
     return g_timer_frequency * milliseconds / 1000U;
+}
+
+static float clamp_value(float value, float limit)
+{
+    if (value > limit) {
+        return limit;
+    }
+    if (value < -limit) {
+        return -limit;
+    }
+    return value;
+}
+
+static float approach(float current, float target, float maximum_step)
+{
+    float difference = target - current;
+
+    if (difference > maximum_step) {
+        return current + maximum_step;
+    }
+    if (difference < -maximum_step) {
+        return current - maximum_step;
+    }
+    return target;
+}
+
+static void clear_motion_command(void)
+{
+    g_motion.target_linear_m_s = 0.0f;
+    g_motion.target_angular_rad_s = 0.0f;
+    g_motion.applied_linear_m_s = 0.0f;
+    g_motion.applied_angular_rad_s = 0.0f;
+    g_motion.command_age_ms = UINT32_MAX;
+    g_motion_command_tick = 0U;
+    g_motion_timeout_ticks = 0U;
+    g_motion_command_valid = 0U;
 }
 
 static int send_frame(const MotorCanFrame *frame)
@@ -116,6 +166,7 @@ static void enter_fault(uint8_t fault)
     g_telemetry.state = BALANCE_STATE_FAULT;
     g_telemetry.left_torque_nm = 0.0f;
     g_telemetry.right_torque_nm = 0.0f;
+    clear_motion_command();
     stop_motors(1U);
 }
 
@@ -188,6 +239,8 @@ int balance_control_init(void)
     memset(&g_telemetry, 0, sizeof(g_telemetry));
     g_telemetry.state = BALANCE_STATE_DISABLED;
     g_telemetry.control_hz = BALANCE_CONTROL_HZ;
+    memset(&g_motion, 0, sizeof(g_motion));
+    g_motion.command_age_ms = UINT32_MAX;
     g_timer_frequency = GenericTimerFrequecy();
     if (g_timer_frequency == 0U ||
         lqr_init(&g_lqr, &g_default_lqr_config) != 0) {
@@ -233,6 +286,9 @@ int balance_control_enable(void)
     g_telemetry.left_torque_nm = 0.0f;
     g_telemetry.right_torque_nm = 0.0f;
     g_pitch_rate_filter_valid = 0U;
+    clear_motion_command();
+    g_motion.wheel_position_m = 0.0f;
+    g_motion.yaw_position_rad = 0.0f;
     motor_build_set_mode(BALANCE_LEFT_MOTOR_ID, 0U, &frame);
     ret |= send_frame(&frame);
     motor_build_set_mode(BALANCE_RIGHT_MOTOR_ID, 0U, &frame);
@@ -266,6 +322,7 @@ void balance_control_disable(void)
     g_telemetry.fault = BALANCE_FAULT_NONE;
     g_telemetry.left_torque_nm = 0.0f;
     g_telemetry.right_torque_nm = 0.0f;
+    clear_motion_command();
 }
 
 void balance_control_poll(void)
@@ -274,6 +331,10 @@ void balance_control_poll(void)
     LqrSensorData sensor;
     LqrOutput output;
     uint8_t fault;
+    float left_velocity_m_s;
+    float right_velocity_m_s;
+    float yaw_torque_nm;
+    float yaw_error_rad_s;
 
     if (!g_initialized) {
         return;
@@ -351,6 +412,28 @@ void balance_control_poll(void)
         return;
     }
     sensor.pitch_rate_rad_s = filter_pitch_rate(sensor.pitch_rate_rad_s);
+    if (g_motion_command_valid) {
+        uint64_t age_ticks = now - g_motion_command_tick;
+        g_motion.command_age_ms = (uint32_t)
+            ((age_ticks * 1000U) / g_timer_frequency);
+        if (age_ticks > g_motion_timeout_ticks) {
+            g_motion.target_linear_m_s = 0.0f;
+            g_motion.target_angular_rad_s = 0.0f;
+            g_motion_command_valid = 0U;
+        }
+    } else {
+        g_motion.command_age_ms = UINT32_MAX;
+    }
+    g_motion.applied_linear_m_s = approach(
+        g_motion.applied_linear_m_s, g_motion.target_linear_m_s,
+        BALANCE_LINEAR_ACCEL_LIMIT_M_S2 / (float)BALANCE_CONTROL_HZ);
+    g_motion.applied_angular_rad_s = approach(
+        g_motion.applied_angular_rad_s, g_motion.target_angular_rad_s,
+        BALANCE_ANGULAR_ACCEL_LIMIT_RAD_S2 / (float)BALANCE_CONTROL_HZ);
+    g_lqr.position_target_m +=
+        g_motion.applied_linear_m_s / (float)BALANCE_CONTROL_HZ;
+    (void)lqr_set_targets(&g_lqr, 0.0f, g_lqr.position_target_m,
+                          g_motion.applied_linear_m_s);
     output = lqr_update(&g_lqr, &sensor);
     if (output.fault || !output.enabled) {
         enter_fault(BALANCE_FAULT_FALL);
@@ -363,6 +446,39 @@ void balance_control_poll(void)
         enter_fault(BALANCE_FAULT_SPEED);
         return;
     }
+    left_velocity_m_s = g_lqr.config.left_motor_direction *
+        sensor.left_velocity_rad_s * g_lqr.config.wheel_radius_m;
+    right_velocity_m_s = g_lqr.config.right_motor_direction *
+        sensor.right_velocity_rad_s * g_lqr.config.wheel_radius_m;
+    g_motion.measured_linear_m_s =
+        0.5f * (left_velocity_m_s + right_velocity_m_s);
+    if (g_motion.wheel_track_m >= BALANCE_MIN_WHEEL_TRACK_M) {
+        g_motion.measured_angular_rad_s =
+            (right_velocity_m_s - left_velocity_m_s) /
+            g_motion.wheel_track_m;
+    } else {
+        g_motion.measured_angular_rad_s = 0.0f;
+    }
+    g_motion.wheel_position_m = output.wheel_position_m;
+    g_motion.yaw_position_rad +=
+        g_motion.measured_angular_rad_s / (float)BALANCE_CONTROL_HZ;
+    yaw_error_rad_s = g_motion.applied_angular_rad_s -
+                      g_motion.measured_angular_rad_s;
+    yaw_torque_nm = clamp_value(
+        BALANCE_YAW_RATE_KP_NM_PER_RAD_S * yaw_error_rad_s,
+        BALANCE_MAX_YAW_TORQUE_NM);
+    if (fabsf(sensor.pitch_rad - g_lqr.config.pitch_offset_rad) >=
+        g_lqr.config.posture_priority_angle_rad) {
+        yaw_torque_nm = 0.0f;
+    }
+    output.left_torque_nm = clamp_value(
+        output.left_torque_nm -
+            g_lqr.config.left_motor_direction * yaw_torque_nm,
+        g_lqr.config.torque_limit_nm);
+    output.right_torque_nm = clamp_value(
+        output.right_torque_nm +
+            g_lqr.config.right_motor_direction * yaw_torque_nm,
+        g_lqr.config.torque_limit_nm);
     if (send_torque(BALANCE_LEFT_MOTOR_ID, output.left_torque_nm) != 0 ||
         send_torque(BALANCE_RIGHT_MOTOR_ID, output.right_torque_nm) != 0) {
         enter_fault(BALANCE_FAULT_CAN);
@@ -502,4 +618,49 @@ int balance_control_set_torque_limit(float torque_limit_nm)
     }
     g_lqr.config.torque_limit_nm = torque_limit_nm;
     return BALANCE_CONFIG_OK;
+}
+
+int balance_control_set_motion_command(float linear_m_s, float angular_rad_s,
+                                       uint16_t timeout_ms)
+{
+    if (g_telemetry.state != BALANCE_STATE_ACTIVE) {
+        return BALANCE_MOTION_NOT_ACTIVE;
+    }
+    if (!isfinite(linear_m_s) || !isfinite(angular_rad_s) ||
+        fabsf(linear_m_s) > BALANCE_MAX_COMMAND_LINEAR_M_S ||
+        fabsf(angular_rad_s) > BALANCE_MAX_COMMAND_ANGULAR_RAD_S ||
+        timeout_ms < BALANCE_MIN_COMMAND_TIMEOUT_MS ||
+        timeout_ms > BALANCE_MAX_COMMAND_TIMEOUT_MS ||
+        (fabsf(angular_rad_s) > 0.0f &&
+         g_motion.wheel_track_m < BALANCE_MIN_WHEEL_TRACK_M)) {
+        return BALANCE_MOTION_INVALID;
+    }
+    g_motion.target_linear_m_s = linear_m_s;
+    g_motion.target_angular_rad_s = angular_rad_s;
+    g_motion_command_tick = GenericTimerRead(GENERIC_TIMER_ID0);
+    g_motion_timeout_ticks = ms_to_ticks(timeout_ms);
+    g_motion_command_valid = 1U;
+    g_motion.command_age_ms = 0U;
+    return BALANCE_MOTION_OK;
+}
+
+int balance_control_set_wheel_track(float wheel_track_m)
+{
+    if (!config_change_allowed()) {
+        return BALANCE_CONFIG_BUSY;
+    }
+    if (!isfinite(wheel_track_m) ||
+        wheel_track_m < BALANCE_MIN_WHEEL_TRACK_M ||
+        wheel_track_m > BALANCE_MAX_WHEEL_TRACK_M) {
+        return BALANCE_CONFIG_INVALID;
+    }
+    g_motion.wheel_track_m = wheel_track_m;
+    return BALANCE_CONFIG_OK;
+}
+
+void balance_control_get_motion_telemetry(BalanceMotionTelemetry *telemetry)
+{
+    if (telemetry != NULL) {
+        *telemetry = g_motion;
+    }
 }

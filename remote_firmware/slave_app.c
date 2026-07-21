@@ -545,6 +545,42 @@ static size_t build_balance_telemetry_ack(uint8_t seq, uint8_t *out,
                         sizeof(payload), out, out_size);
 }
 
+static size_t build_chassis_telemetry_ack(uint8_t type, uint8_t seq,
+                                          uint8_t status, uint8_t *out,
+                                          size_t out_size)
+{
+    const BalanceTelemetry *balance = balance_control_get_telemetry();
+    BalanceMotionTelemetry motion;
+    uint8_t payload[CHASSIS_TELEMETRY_PAYLOAD_SIZE];
+
+    memset(payload, 0, sizeof(payload));
+    balance_control_get_motion_telemetry(&motion);
+    payload[0] = CHASSIS_TELEMETRY_VERSION;
+    payload[1] = status;
+    payload[2] = balance->state;
+    payload[3] = balance->fault;
+    write_be_u32(&payload[4], motion.command_age_ms);
+    write_be_i32(&payload[8],
+                 float_to_i32(motion.target_linear_m_s, 1000000.0f));
+    write_be_i32(&payload[12],
+                 float_to_i32(motion.target_angular_rad_s, 1000000.0f));
+    write_be_i32(&payload[16],
+                 float_to_i32(motion.applied_linear_m_s, 1000000.0f));
+    write_be_i32(&payload[20],
+                 float_to_i32(motion.applied_angular_rad_s, 1000000.0f));
+    write_be_i32(&payload[24],
+                 float_to_i32(motion.measured_linear_m_s, 1000000.0f));
+    write_be_i32(&payload[28],
+                 float_to_i32(motion.measured_angular_rad_s, 1000000.0f));
+    write_be_i32(&payload[32],
+                 float_to_i32(motion.wheel_position_m, 1000000.0f));
+    write_be_i32(&payload[36],
+                 float_to_i32(motion.yaw_position_rad, 1000000.0f));
+    write_be_i32(&payload[40],
+                 float_to_i32(motion.wheel_track_m, 1000000.0f));
+    return rpmsg_encode(type, seq, payload, sizeof(payload), out, out_size);
+}
+
 static size_t build_speed_diag_ack(uint8_t seq, uint8_t *out,
                                    size_t out_size)
 {
@@ -1076,6 +1112,32 @@ size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply,
         }
         return build_balance_config_ack(frame.type, frame.seq, (uint8_t)status,
                                         reply, reply_size);
+    }
+    case CMD_CHASSIS_SET_VELOCITY: {
+        int status = BALANCE_MOTION_INVALID;
+        if (frame.length >= 10U) {
+            status = balance_control_set_motion_command(
+                (float)read_be_i32(&frame.payload[0]) / 1000000.0f,
+                (float)read_be_i32(&frame.payload[4]) / 1000000.0f,
+                read_be_u16(&frame.payload[8]));
+        }
+        return build_chassis_telemetry_ack(frame.type, frame.seq,
+                                           (uint8_t)status,
+                                           reply, reply_size);
+    }
+    case CMD_CHASSIS_STATUS:
+        return build_chassis_telemetry_ack(frame.type, frame.seq,
+                                           BALANCE_MOTION_OK,
+                                           reply, reply_size);
+    case CMD_CHASSIS_SET_TRACK_WIDTH: {
+        int status = BALANCE_CONFIG_INVALID;
+        if (frame.length >= 4U) {
+            status = balance_control_set_wheel_track(
+                (float)read_be_i32(frame.payload) / 1000000.0f);
+        }
+        return build_chassis_telemetry_ack(frame.type, frame.seq,
+                                           (uint8_t)status,
+                                           reply, reply_size);
     }
     case CMD_CAN_ZERO_POSITION:
         if (frame.length >= 1 && !is_gimbal_motor(frame.payload[0])) {

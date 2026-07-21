@@ -216,6 +216,34 @@ rprun balance-reset-config
 控制器会临时屏蔽相反的行走力矩，优先使用电机力矩恢复姿态。回到阈值以内后
 自动恢复完整四状态 LQR。
 
+## 底盘速度控制与 ROS 2
+
+固定腿高并完成平衡验证后，从核可以接收带看门狗的线速度和角速度目标。
+线速度经过加速度限制后进入 LQR 的速度参考，同时积分为连续位置参考；角速度
+使用左右轮差动力矩闭环。姿态超过姿态优先角时，从核暂停转向力矩，把执行器
+能力优先留给俯仰恢复。
+
+先在平衡关闭时配置实测轮距，再启用平衡和发送低速命令：
+
+```bash
+rprun balance-disable
+rprun chassis-track 0.25
+rprun balance-enable
+rprun chassis-velocity 0.02 0.0 300
+rprun chassis-status
+rprun chassis-velocity 0.0 0.0 100
+rprun balance-disable
+```
+
+`0.25 m` 只是命令格式示例，必须替换为左右轮与地面接触中心的实测距离。
+未设置轮距时从核拒绝非零角速度。命令超时后从核独立把速度目标平滑降到零，
+因此 ROS、Broker 或主核应用异常退出不会留下永久运动命令。
+
+ROS 2 包位于 `ros2/chassis_control_ros2`，订阅 `/cmd_vel`，发布 `/odom` 和
+`/diagnostics`。构建、参数和首次低风险验证见该目录的 `README.md`。可变腿高
+不会在本轮随底盘命令一起开放，实施门槛和增益调度方案见
+`VARIABLE_LEG_HEIGHT_CONTROL_PLAN.md`。
+
 ## 高频平衡日志
 
 `balance_logger` 使用一个常驻进程和轻量 RPMsg 遥测回复，不再为每个样本

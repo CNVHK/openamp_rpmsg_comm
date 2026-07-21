@@ -46,6 +46,14 @@ int main(void)
     assert(fabsf(output.wheel_position_m) < 1.0e-6f);
     assert(fabsf(output.left_torque_nm) < 1.0e-6f);
 
+    assert(lqr_set_targets(&controller, 0.0f, 0.10f, 0.20f) == 0);
+    output = lqr_update(&controller, &sensor);
+    assert(output.left_torque_nm < 0.0f);
+    assert(output.right_torque_nm > 0.0f);
+    assert(lqr_set_targets(&controller, NAN, 0.0f, 0.0f) == -1);
+    assert(lqr_set_targets(NULL, 0.0f, 0.0f, 0.0f) == -1);
+    assert(lqr_set_targets(&controller, 0.0f, 0.0f, 0.0f) == 0);
+
     sensor.pitch_rad = 0.04f;
     output = lqr_update(&controller, &sensor);
     assert(output.left_torque_nm > 0.0f);

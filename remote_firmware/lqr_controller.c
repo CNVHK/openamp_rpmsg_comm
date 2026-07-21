@@ -72,6 +72,20 @@ void lqr_disable(LqrController *controller)
     }
 }
 
+int lqr_set_targets(LqrController *controller, float pitch_target_rad,
+                    float position_target_m, float velocity_target_m_s)
+{
+    if (controller == NULL || !controller->initialized ||
+        !isfinite(pitch_target_rad) || !isfinite(position_target_m) ||
+        !isfinite(velocity_target_m_s)) {
+        return -1;
+    }
+    controller->pitch_target_rad = pitch_target_rad;
+    controller->position_target_m = position_target_m;
+    controller->velocity_target_m_s = velocity_target_m_s;
+    return 0;
+}
+
 LqrOutput lqr_update(LqrController *controller, const LqrSensorData *sensor)
 {
     LqrOutput output;

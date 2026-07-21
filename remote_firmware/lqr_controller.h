@@ -51,6 +51,8 @@ typedef struct {
 int lqr_init(LqrController *controller, const LqrConfig *config);
 int lqr_enable(LqrController *controller, const LqrSensorData *sensor);
 void lqr_disable(LqrController *controller);
+int lqr_set_targets(LqrController *controller, float pitch_target_rad,
+                    float position_target_m, float velocity_target_m_s);
 LqrOutput lqr_update(LqrController *controller, const LqrSensorData *sensor);
 
 #endif
