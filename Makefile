@@ -3,7 +3,7 @@ CFLAGS ?= -std=c99 -Wall -Wextra -I./src
 PYTHON ?= python3
 BUILD_DIR := build
 
-.PHONY: all test test-python test-ros-python client logger gimbal broker firmware-elf install-rpmsg-broker install-rpmsg-monitor install-gimbal-daemon install-gimbal-tf-state clean
+.PHONY: all test test-python test-ros-python client logger gimbal broker firmware-elf install-rpmsg-broker install-rpmsg-monitor install-gimbal-daemon install-gimbal-tf-state install-chassis-state install-chassis-state-user clean
 
 all: test client logger gimbal broker
 
@@ -17,7 +17,7 @@ test: $(BUILD_DIR) $(BUILD_DIR)/test_protocol $(BUILD_DIR)/test_motor_can \
 	$(BUILD_DIR)/rpmsg-broker test-python
 
 test-python: $(BUILD_DIR)/rpmsg-broker
-	$(PYTHON) -m unittest tests/test_gimbal_daemon.py tests/test_gimbal_tf_state_bridge.py tests/test_rpmsg_broker.py tests/test_rpmsg_monitor.py
+	$(PYTHON) -m unittest tests/test_chassis_state_bridge.py tests/test_gimbal_daemon.py tests/test_gimbal_tf_state_bridge.py tests/test_rpmsg_broker.py tests/test_rpmsg_monitor.py
 
 test-ros-python:
 	PYTHONPATH=ros2/gimbal_camera_tf_ros2:$${PYTHONPATH} $(PYTHON) -m unittest discover -s ros2/gimbal_camera_tf_ros2/test -p 'test_*.py'
@@ -55,6 +55,15 @@ install-gimbal-tf-state:
 	install -m 0755 linux_user/gimbal_tf_state_bridge.py /usr/local/libexec/gimbal-tf-state-bridge
 	install -m 0644 integration/systemd/gimbal-tf-state.service /etc/systemd/system/gimbal-tf-state.service
 	install -m 0644 integration/systemd/gimbal-camera-tf.service /etc/systemd/system/gimbal-camera-tf.service
+
+install-chassis-state:
+	install -d -m 0755 /usr/local/libexec
+	install -m 0755 linux_user/chassis_state_bridge.py /usr/local/libexec/chassis-state-bridge
+	install -m 0644 integration/systemd/chassis-state.service /etc/systemd/system/chassis-state.service
+
+install-chassis-state-user:
+	install -d -m 0755 $(HOME)/.config/systemd/user
+	install -m 0644 integration/systemd/user/chassis-state.service $(HOME)/.config/systemd/user/chassis-state.service
 
 $(BUILD_DIR)/test_protocol: src/rpmsg_protocol.c src/rpmsg_protocol.h tests/test_protocol.c
 	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@
