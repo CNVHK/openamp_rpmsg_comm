@@ -415,6 +415,28 @@ sudo ./build/gimbal_test /dev/rpmsg0 estop
 
 `status` 会显示目标和实际角度、速度、电流、反馈年龄、软件边界、运行状态和故障。正常缓降只能减少突然失力，无法保证所有重心和摩擦条件下摄像头都不下坠，机械结构仍应配置限位和必要的阻尼或防坠措施。
 
+## 云台相机动态 TF
+
+`ros2/gimbal_camera_tf_ros2` 发布以下坐标链：
+
+```text
+base_link -> gimbal_yaw_link -> gimbal_pitch_link
+          -> camera_link -> camera_color_optical_frame
+```
+
+宿主机的 `gimbal-tf-state-bridge` 直接访问 `gimbal-daemon` Unix socket，不再以
+高频子进程调用 `gimbalctl`。ROS 节点只在双轴反馈有效、无故障且状态新鲜时发布
+动态 TF，并通过 `/gimbal/tf_status` 显式通知消费者当前姿态是否可信。
+
+```bash
+sudo make install-gimbal-tf-state
+cd ros2
+colcon build --packages-select gimbal_camera_tf_ros2 --symlink-install
+```
+
+目标定位等消费者必须同时检查 `/gimbal/tf_status` 和变换时间戳，不能在反馈失效后
+继续使用 TF2 缓存中的最后一帧姿态。外参、轴方向和零偏见该包的配置与 README。
+
 ## 从核工程必须配置
 
 在飞腾 Pi OS 从核工程配置文件中至少启用：
