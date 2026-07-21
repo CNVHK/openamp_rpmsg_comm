@@ -7,7 +7,7 @@ openamp_chassis:
     max_linear_m_s: 0.20
     max_angular_rad_s: 0.50
     # Measure wheel-ground contact center distance before enabling angular.z.
-    wheel_track_m: 0.0
+    wheel_track_m: 0.36
     odom_frame: odom
     base_frame: base_link
     # Keep false when lidar odometry or another localization node owns odom TF.
