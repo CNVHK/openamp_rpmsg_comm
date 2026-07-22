@@ -105,6 +105,20 @@ static void test_balance_runtime_tuning_frames(void)
     }
 }
 
+static void test_balance_position_hold_frame(void)
+{
+    uint8_t payload[13] = {1U};
+    uint8_t buffer[24];
+    RpmsgFrame frame;
+    size_t size = rpmsg_encode(CMD_BALANCE_SET_POSITION_HOLD, 10U, payload,
+                               sizeof(payload), buffer, sizeof(buffer));
+
+    assert(size == 18U);
+    assert(rpmsg_decode(buffer, size, &frame));
+    assert(frame.type == CMD_BALANCE_SET_POSITION_HOLD);
+    assert(frame.length == sizeof(payload));
+}
+
 int main(void)
 {
     test_encode_decode();
@@ -114,6 +128,7 @@ int main(void)
     test_motor_speed_diag_frame();
     test_balance_telemetry_frame();
     test_balance_runtime_tuning_frames();
+    test_balance_position_hold_frame();
     printf("rpmsg protocol tests passed\n");
     return 0;
 }

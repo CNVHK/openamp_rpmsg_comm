@@ -12,6 +12,7 @@ $(BUILD_DIR):
 
 test: $(BUILD_DIR) $(BUILD_DIR)/test_protocol $(BUILD_DIR)/test_motor_can \
 	$(BUILD_DIR)/test_motor_balance_protocol $(BUILD_DIR)/test_lqr_controller \
+	$(BUILD_DIR)/test_position_hold_controller \
 	$(BUILD_DIR)/test_gimbal_controller $(BUILD_DIR)/test_servo_motion_controller \
 	$(BUILD_DIR)/test_leg_joint_mapping $(BUILD_DIR)/test_leg_kinematics \
 	$(BUILD_DIR)/rpmsg-broker test-python
@@ -75,6 +76,9 @@ $(BUILD_DIR)/test_motor_balance_protocol: remote_firmware/motor_can.c remote_fir
 	$(CC) $(CFLAGS) -I./remote_firmware $(filter %.c,$^) -o $@
 
 $(BUILD_DIR)/test_lqr_controller: remote_firmware/lqr_controller.c remote_firmware/lqr_controller.h tests/lqr_controller_test.c
+	$(CC) $(CFLAGS) -I./remote_firmware $(filter %.c,$^) -lm -o $@
+
+$(BUILD_DIR)/test_position_hold_controller: remote_firmware/position_hold_controller.c remote_firmware/position_hold_controller.h tests/position_hold_controller_test.c
 	$(CC) $(CFLAGS) -I./remote_firmware $(filter %.c,$^) -lm -o $@
 
 $(BUILD_DIR)/test_gimbal_controller: remote_firmware/gimbal_controller.c remote_firmware/gimbal_controller.h remote_firmware/motor_can.c remote_firmware/motor_can.h tests/gimbal_controller_test.c tests/stubs/fgeneric_timer.h tests/stubs/fparameters.h

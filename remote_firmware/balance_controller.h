@@ -54,6 +54,10 @@ typedef struct {
     float motor_feedback_speed_scale;
     float pitch_rate_filter_hz;
     float torque_limit_nm;
+    float position_hold_kp_rad_per_m;
+    float position_hold_kd_rad_per_m_s;
+    float position_hold_limit_rad;
+    uint8_t position_hold_enabled;
 } BalanceRuntimeConfig;
 
 typedef struct {
@@ -93,6 +97,9 @@ int balance_control_set_speed_limit(float max_wheel_speed_m_s);
 int balance_control_set_pitch_rate_filter(float cutoff_hz);
 int balance_control_set_posture_priority(float angle_rad);
 int balance_control_set_torque_limit(float torque_limit_nm);
+int balance_control_set_position_hold(uint8_t enabled, float kp_rad_per_m,
+                                      float kd_rad_per_m_s,
+                                      float pitch_limit_rad);
 int balance_control_set_motion_command(float linear_m_s, float angular_rad_s,
                                        uint16_t timeout_ms);
 int balance_control_set_wheel_track(float wheel_track_m);

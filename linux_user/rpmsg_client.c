@@ -11,7 +11,7 @@
 #include <sys/select.h>
 #include <unistd.h>
 
-#define RPMSG_CLIENT_VERSION "0.23.0-chassis-motion"
+#define RPMSG_CLIENT_VERSION "0.25.0-position-hold"
 #define RAD_PER_DEG 0.017453292519943295f
 
 static int wait_readable(int fd, int timeout_ms)
@@ -146,6 +146,8 @@ static void usage(const char *prog)
     printf("  %s <rpmsg_dev> balance-filter <5..40_hz>\n", prog);
     printf("  %s <rpmsg_dev> balance-posture-angle <1..10_deg>\n", prog);
     printf("  %s <rpmsg_dev> balance-torque-limit <0.05..0.30_nm>\n", prog);
+    printf("  %s <rpmsg_dev> balance-position-hold off\n", prog);
+    printf("  %s <rpmsg_dev> balance-position-hold <0..28.6_kp_deg_m> <0..57.3_kd_deg_m_s> <0.1..3_limit_deg>\n", prog);
     printf("  %s <rpmsg_dev> chassis-track <0.08..0.50_m>\n", prog);
     printf("  %s <rpmsg_dev> chassis-velocity <-0.4..0.4_m_s> <-1..1_rad_s> [100..1000_timeout_ms]\n", prog);
     printf("  %s <rpmsg_dev> chassis-status\n", prog);
@@ -178,6 +180,7 @@ static void usage(const char *prog)
     printf("  %s /dev/rpmsg0 balance-filter 20\n", prog);
     printf("  %s /dev/rpmsg0 balance-posture-angle 3\n", prog);
     printf("  %s /dev/rpmsg0 balance-torque-limit 0.22\n", prog);
+    printf("  %s /dev/rpmsg0 balance-position-hold 1.5 2.0 0.8\n", prog);
     printf("  %s /dev/rpmsg0 chassis-track 0.18\n", prog);
     printf("  %s /dev/rpmsg0 chassis-velocity 0.10 0.0 300\n", prog);
     printf("  %s /dev/rpmsg0 chassis-status\n", prog);
@@ -629,6 +632,34 @@ static int build_command(int argc, char **argv, uint8_t *type, uint8_t *payload,
         return 0;
     }
 
+    if (strcmp(cmd, "balance-position-hold") == 0) {
+        float values_deg[3];
+
+        *type = CMD_BALANCE_SET_POSITION_HOLD;
+        if (argc == 4 && strcmp(argv[3], "off") == 0) {
+            payload[0] = 0U;
+            *payload_len = 1U;
+            return 0;
+        }
+        if (argc != 6) return -1;
+        for (int i = 0; i < 3; ++i) {
+            char *end = NULL;
+            values_deg[i] = strtof(argv[3 + i], &end);
+            if (end == argv[3 + i] || *end != '\0' ||
+                !isfinite(values_deg[i])) return -1;
+        }
+        if (values_deg[0] < 0.0f || values_deg[0] > 28.6f ||
+            values_deg[1] < 0.0f || values_deg[1] > 57.3f ||
+            values_deg[2] < 0.1f || values_deg[2] > 3.0f) return -1;
+        payload[0] = 1U;
+        for (int i = 0; i < 3; ++i) {
+            put_be_i32(&payload[1 + i * 4],
+                       scaled_i32(values_deg[i] * RAD_PER_DEG, 1000000.0f));
+        }
+        *payload_len = 13U;
+        return 0;
+    }
+
     if (strcmp(cmd, "chassis-track") == 0) {
         char *end = NULL;
         float wheel_track_m;
@@ -937,7 +968,7 @@ int main(int argc, char **argv)
     if ((type >= CMD_BALANCE_SET_TRIM &&
          type <= CMD_BALANCE_SET_SPEED_LIMIT) ||
         (type >= CMD_BALANCE_SET_FILTER &&
-         type <= CMD_BALANCE_SET_TORQUE_LIMIT)) {
+         type <= CMD_BALANCE_SET_POSITION_HOLD)) {
         static const char *const status_names[] = {
             "ok", "invalid", "busy"
         };
@@ -978,6 +1009,16 @@ int main(int argc, char **argv)
         if (ack.length >= 44U && ack.payload[0] >= 4U) {
             printf("single-wheel torque limit: %.6f Nm\n",
                    (double)read_be_i32(&ack.payload[40]) / 1000000.0);
+        }
+        if (ack.length >= 60U && ack.payload[0] >= 5U) {
+            printf("position hold: %s kp=%.6f deg/m kd=%.6f deg/(m/s) limit=%.6f deg\n",
+                   ack.payload[56] ? "enabled" : "disabled",
+                   (double)read_be_i32(&ack.payload[44]) / 1000000.0 /
+                       RAD_PER_DEG,
+                   (double)read_be_i32(&ack.payload[48]) / 1000000.0 /
+                       RAD_PER_DEG,
+                   (double)read_be_i32(&ack.payload[52]) / 1000000.0 /
+                       RAD_PER_DEG);
         }
         close(fd);
         return status == 0U ? 0 : 4;

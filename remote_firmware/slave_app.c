@@ -425,11 +425,11 @@ static size_t build_balance_config_ack(uint8_t type, uint8_t seq,
 {
     const BalanceTelemetry *telemetry = balance_control_get_telemetry();
     BalanceRuntimeConfig config;
-    uint8_t payload[44];
+    uint8_t payload[60];
 
     memset(payload, 0, sizeof(payload));
     balance_control_get_runtime_config(&config);
-    payload[0] = 4U;
+    payload[0] = 5U;
     payload[1] = status;
     payload[2] = telemetry->state;
     write_be_i32(&payload[4], float_to_i32(config.pitch_trim_rad, 1000000.0f));
@@ -447,6 +447,13 @@ static size_t build_balance_config_ack(uint8_t type, uint8_t seq,
                  float_to_i32(config.pitch_rate_filter_hz, 1000000.0f));
     write_be_i32(&payload[40],
                  float_to_i32(config.torque_limit_nm, 1000000.0f));
+    write_be_i32(&payload[44],
+                 float_to_i32(config.position_hold_kp_rad_per_m, 1000000.0f));
+    write_be_i32(&payload[48],
+                 float_to_i32(config.position_hold_kd_rad_per_m_s, 1000000.0f));
+    write_be_i32(&payload[52],
+                 float_to_i32(config.position_hold_limit_rad, 1000000.0f));
+    payload[56] = config.position_hold_enabled;
     return rpmsg_encode(type, seq, payload, sizeof(payload), out, out_size);
 }
 
@@ -1157,6 +1164,20 @@ size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply,
         if (frame.length >= 4U) {
             status = balance_control_set_torque_limit(
                 (float)read_be_i32(frame.payload) / 1000000.0f);
+        }
+        return build_balance_config_ack(frame.type, frame.seq, (uint8_t)status,
+                                        reply, reply_size);
+    }
+    case CMD_BALANCE_SET_POSITION_HOLD: {
+        int status = BALANCE_CONFIG_INVALID;
+        if (frame.length == 1U && frame.payload[0] == 0U) {
+            status = balance_control_set_position_hold(0U, 0.0f, 0.0f, 0.0f);
+        } else if (frame.length >= 13U && frame.payload[0] == 1U) {
+            status = balance_control_set_position_hold(
+                1U,
+                (float)read_be_i32(&frame.payload[1]) / 1000000.0f,
+                (float)read_be_i32(&frame.payload[5]) / 1000000.0f,
+                (float)read_be_i32(&frame.payload[9]) / 1000000.0f);
         }
         return build_balance_config_ack(frame.type, frame.seq, (uint8_t)status,
                                         reply, reply_size);

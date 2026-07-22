@@ -7,6 +7,7 @@
 #include "motor_can.h"
 #include "phytium_bmi088_port.h"
 #include "phytium_can_port.h"
+#include "position_hold_controller.h"
 
 #include <math.h>
 #include <string.h>
@@ -45,6 +46,13 @@
 #define BALANCE_MAX_WHEEL_TRACK_M 0.50f
 #define BALANCE_YAW_RATE_KP_NM_PER_RAD_S 0.04f
 #define BALANCE_MAX_YAW_TORQUE_NM 0.05f
+#define BALANCE_DEFAULT_POSITION_HOLD_KP_RAD_PER_M (1.5f * BALANCE_PI / 180.0f)
+#define BALANCE_DEFAULT_POSITION_HOLD_KD_RAD_PER_M_S (2.0f * BALANCE_PI / 180.0f)
+#define BALANCE_DEFAULT_POSITION_HOLD_LIMIT_RAD (0.8f * BALANCE_PI / 180.0f)
+#define BALANCE_MAX_POSITION_HOLD_KP_RAD_PER_M 0.5f
+#define BALANCE_MAX_POSITION_HOLD_KD_RAD_PER_M_S 1.0f
+#define BALANCE_MIN_POSITION_HOLD_LIMIT_RAD (0.1f * BALANCE_PI / 180.0f)
+#define BALANCE_MAX_POSITION_HOLD_LIMIT_RAD (3.0f * BALANCE_PI / 180.0f)
 
 static LqrController g_lqr;
 static BalanceTelemetry g_telemetry;
@@ -60,6 +68,13 @@ static BalanceMotionTelemetry g_motion;
 static uint64_t g_motion_command_tick;
 static uint64_t g_motion_timeout_ticks;
 static uint8_t g_motion_command_valid;
+static float g_position_target_m;
+static PositionHoldConfig g_position_hold = {
+    .kp_rad_per_m = BALANCE_DEFAULT_POSITION_HOLD_KP_RAD_PER_M,
+    .kd_rad_per_m_s = BALANCE_DEFAULT_POSITION_HOLD_KD_RAD_PER_M_S,
+    .pitch_limit_rad = BALANCE_DEFAULT_POSITION_HOLD_LIMIT_RAD,
+    .enabled = 0U,
+};
 
 static const LqrConfig g_default_lqr_config = {
     /* 100 Hz discrete LQR; input is tau_left + tau_right in N*m. */
@@ -293,6 +308,7 @@ int balance_control_enable_serviced(BalanceCalibrationService service,
     clear_motion_command();
     g_motion.wheel_position_m = 0.0f;
     g_motion.yaw_position_rad = 0.0f;
+    g_position_target_m = 0.0f;
     motor_build_set_mode(BALANCE_LEFT_MOTOR_ID, 0U, &frame);
     ret |= send_frame(&frame);
     motor_build_set_mode(BALANCE_RIGHT_MOTOR_ID, 0U, &frame);
@@ -344,6 +360,9 @@ void balance_control_poll(void)
     float right_velocity_m_s;
     float yaw_torque_nm;
     float yaw_error_rad_s;
+    float wheel_position_m;
+    float wheel_velocity_m_s;
+    float pitch_target_rad;
 
     if (!g_initialized) {
         return;
@@ -439,10 +458,26 @@ void balance_control_poll(void)
     g_motion.applied_angular_rad_s = approach(
         g_motion.applied_angular_rad_s, g_motion.target_angular_rad_s,
         BALANCE_ANGULAR_ACCEL_LIMIT_RAD_S2 / (float)BALANCE_CONTROL_HZ);
-    g_lqr.position_target_m +=
+    g_position_target_m +=
         g_motion.applied_linear_m_s / (float)BALANCE_CONTROL_HZ;
-    (void)lqr_set_targets(&g_lqr, 0.0f, g_lqr.position_target_m,
-                          g_motion.applied_linear_m_s);
+    wheel_position_m = 0.5f * g_lqr.config.wheel_radius_m *
+        (g_lqr.config.left_motor_direction * sensor.left_position_rad +
+         g_lqr.config.right_motor_direction * sensor.right_position_rad) -
+        g_lqr.wheel_zero_position_m;
+    wheel_velocity_m_s = 0.5f * g_lqr.config.wheel_radius_m *
+        (g_lqr.config.left_motor_direction * sensor.left_velocity_rad_s +
+         g_lqr.config.right_motor_direction * sensor.right_velocity_rad_s);
+    if (g_position_hold.enabled) {
+        pitch_target_rad = position_hold_pitch_target(
+            &g_position_hold,
+            wheel_position_m - g_position_target_m,
+            wheel_velocity_m_s - g_motion.applied_linear_m_s);
+        (void)lqr_set_targets(&g_lqr, pitch_target_rad, wheel_position_m,
+                              wheel_velocity_m_s);
+    } else {
+        (void)lqr_set_targets(&g_lqr, 0.0f, g_position_target_m,
+                              g_motion.applied_linear_m_s);
+    }
     output = lqr_update(&g_lqr, &sensor);
     if (output.fault || !output.enabled) {
         enter_fault(BALANCE_FAULT_FALL);
@@ -524,6 +559,10 @@ void balance_control_get_runtime_config(BalanceRuntimeConfig *config)
     config->motor_feedback_speed_scale = BALANCE_MOTOR_FEEDBACK_SPEED_SCALE;
     config->pitch_rate_filter_hz = g_pitch_rate_filter_hz;
     config->torque_limit_nm = g_lqr.config.torque_limit_nm;
+    config->position_hold_kp_rad_per_m = g_position_hold.kp_rad_per_m;
+    config->position_hold_kd_rad_per_m_s = g_position_hold.kd_rad_per_m_s;
+    config->position_hold_limit_rad = g_position_hold.pitch_limit_rad;
+    config->position_hold_enabled = g_position_hold.enabled;
 }
 
 int balance_control_set_pitch_trim(float pitch_trim_rad)
@@ -569,6 +608,13 @@ int balance_control_reset_runtime_config(void)
     g_max_wheel_speed_m_s = BALANCE_DEFAULT_MAX_WHEEL_SPEED_M_S;
     g_pitch_rate_filter_hz = BALANCE_DEFAULT_PITCH_RATE_FILTER_HZ;
     g_pitch_rate_filter_valid = 0U;
+    g_position_hold.kp_rad_per_m =
+        BALANCE_DEFAULT_POSITION_HOLD_KP_RAD_PER_M;
+    g_position_hold.kd_rad_per_m_s =
+        BALANCE_DEFAULT_POSITION_HOLD_KD_RAD_PER_M_S;
+    g_position_hold.pitch_limit_rad =
+        BALANCE_DEFAULT_POSITION_HOLD_LIMIT_RAD;
+    g_position_hold.enabled = 0U;
     return BALANCE_CONFIG_OK;
 }
 
@@ -626,6 +672,34 @@ int balance_control_set_torque_limit(float torque_limit_nm)
         return BALANCE_CONFIG_INVALID;
     }
     g_lqr.config.torque_limit_nm = torque_limit_nm;
+    return BALANCE_CONFIG_OK;
+}
+
+int balance_control_set_position_hold(uint8_t enabled, float kp_rad_per_m,
+                                      float kd_rad_per_m_s,
+                                      float pitch_limit_rad)
+{
+    PositionHoldConfig config;
+
+    if (!config_change_allowed()) {
+        return BALANCE_CONFIG_BUSY;
+    }
+    if (enabled == 0U) {
+        g_position_hold.enabled = 0U;
+        return BALANCE_CONFIG_OK;
+    }
+    config.kp_rad_per_m = kp_rad_per_m;
+    config.kd_rad_per_m_s = kd_rad_per_m_s;
+    config.pitch_limit_rad = pitch_limit_rad;
+    config.enabled = 1U;
+    if (!position_hold_config_is_valid(&config) ||
+        kp_rad_per_m > BALANCE_MAX_POSITION_HOLD_KP_RAD_PER_M ||
+        kd_rad_per_m_s > BALANCE_MAX_POSITION_HOLD_KD_RAD_PER_M_S ||
+        pitch_limit_rad < BALANCE_MIN_POSITION_HOLD_LIMIT_RAD ||
+        pitch_limit_rad > BALANCE_MAX_POSITION_HOLD_LIMIT_RAD) {
+        return BALANCE_CONFIG_INVALID;
+    }
+    g_position_hold = config;
     return BALANCE_CONFIG_OK;
 }
 
