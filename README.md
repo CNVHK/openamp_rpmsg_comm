@@ -33,6 +33,9 @@ make test
 DEPLOY_VERIFY.md
 ```
 
+平衡位置外环的控制结构、协议、遥测、调参和当前部署边界见
+[POSITION_HOLD_OUTER_LOOP_HANDOFF.md](POSITION_HOLD_OUTER_LOOP_HANDOFF.md)。
+
 ## 板上验证步骤
 
 1. 飞腾派启动 Linux。
