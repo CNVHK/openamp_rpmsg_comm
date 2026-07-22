@@ -15,7 +15,13 @@
 #define GIMBAL_MAX_TORQUE_PERCENT 80U
 #define GIMBAL_MIN_CONFIG_SPEED_RPM 1U
 #define GIMBAL_MAX_CONFIG_SPEED_RPM 60U
-#define GIMBAL_FEEDBACK_TIMEOUT_MS 500U
+/*
+ * balance-enable performs a synchronous one-second gyro calibration.  CAN
+ * feedback polling pauses during that window, so retain the last valid gimbal
+ * sample long enough to resume position keepalives afterwards.  The Linux
+ * daemon still rejects new motion commands once feedback is 500 ms old.
+ */
+#define GIMBAL_FEEDBACK_TIMEOUT_MS 2000U
 #define GIMBAL_HOME_TIMEOUT_MS 12000U
 #define GIMBAL_START_DELAY_MS 20U
 #define GIMBAL_HOME_TOLERANCE_X100_DEG 100
