@@ -76,7 +76,11 @@ enum {
 };
 
 int balance_control_init(void);
+typedef void (*BalanceCalibrationService)(void *context);
+
 int balance_control_enable(void);
+int balance_control_enable_serviced(BalanceCalibrationService service,
+                                    void *context);
 void balance_control_disable(void);
 void balance_control_poll(void);
 const BalanceTelemetry *balance_control_get_telemetry(void);

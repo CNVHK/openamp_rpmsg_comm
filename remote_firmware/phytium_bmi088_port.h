@@ -25,9 +25,15 @@ typedef struct {
     uint8_t calibrated;
 } PhytiumBmi088Sample;
 
+typedef void (*PhytiumBmi088CalibrationService)(void *context);
+
 int phytium_bmi088_init(void);
 int phytium_bmi088_read_sample(void);
 int phytium_bmi088_calibrate_gyro(uint16_t sample_count);
+int phytium_bmi088_calibrate_gyro_serviced(
+    uint16_t sample_count,
+    PhytiumBmi088CalibrationService service,
+    void *context);
 int phytium_bmi088_update(float dt_s);
 int phytium_bmi088_get_sample(PhytiumBmi088Sample *sample);
 const PhytiumBmi088DebugState *phytium_bmi088_get_debug_state(void);

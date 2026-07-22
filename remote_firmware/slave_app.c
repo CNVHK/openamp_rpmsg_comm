@@ -958,6 +958,12 @@ void slave_app_shutdown(void)
     balance_control_disable();
 }
 
+static void service_gimbal_during_balance_calibration(void *context)
+{
+    (void)context;
+    gimbal_control_poll();
+}
+
 size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply, size_t reply_size)
 {
     RpmsgFrame frame;
@@ -1081,7 +1087,8 @@ size_t slave_handle_frame(const uint8_t *data, unsigned int len, uint8_t *reply,
     }
     case CMD_BALANCE_ENABLE:
         servo_motion_stop();
-        (void)balance_control_enable();
+        (void)balance_control_enable_serviced(
+            service_gimbal_during_balance_calibration, NULL);
         return build_ack(frame.seq, reply, reply_size);
     case CMD_BALANCE_DISABLE:
         balance_control_disable();

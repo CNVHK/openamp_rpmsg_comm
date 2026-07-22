@@ -317,7 +317,10 @@ int phytium_bmi088_read_sample(void)
     return 0;
 }
 
-int phytium_bmi088_calibrate_gyro(uint16_t sample_count)
+int phytium_bmi088_calibrate_gyro_serviced(
+    uint16_t sample_count,
+    PhytiumBmi088CalibrationService service,
+    void *context)
 {
     float sum[3] = {0.0f, 0.0f, 0.0f};
 
@@ -334,6 +337,9 @@ int phytium_bmi088_calibrate_gyro(uint16_t sample_count)
         for (int axis = 0; axis < 3; ++axis) {
             sum[axis] += (float)g_dbg.gyro_raw[axis] * BMI088_GYRO_SCALE;
         }
+        if (service != NULL) {
+            service(context);
+        }
         fsleep_millisec(10);
     }
 
@@ -342,6 +348,11 @@ int phytium_bmi088_calibrate_gyro(uint16_t sample_count)
     }
     g_sample.calibrated = 1U;
     return 0;
+}
+
+int phytium_bmi088_calibrate_gyro(uint16_t sample_count)
+{
+    return phytium_bmi088_calibrate_gyro_serviced(sample_count, NULL, NULL);
 }
 
 int phytium_bmi088_update(float dt_s)
@@ -431,6 +442,17 @@ int phytium_bmi088_read_sample(void)
 int phytium_bmi088_calibrate_gyro(uint16_t sample_count)
 {
     (void)sample_count;
+    return -98;
+}
+
+int phytium_bmi088_calibrate_gyro_serviced(
+    uint16_t sample_count,
+    PhytiumBmi088CalibrationService service,
+    void *context)
+{
+    (void)sample_count;
+    (void)service;
+    (void)context;
     return -98;
 }
 

@@ -261,7 +261,8 @@ int balance_control_init(void)
     return 0;
 }
 
-int balance_control_enable(void)
+int balance_control_enable_serviced(BalanceCalibrationService service,
+                                    void *context)
 {
     MotorCanFrame frame;
     int ret = 0;
@@ -273,7 +274,10 @@ int balance_control_enable(void)
 
     g_telemetry.fault = BALANCE_FAULT_NONE;
     lqr_disable(&g_lqr);
-    if (phytium_bmi088_calibrate_gyro(BALANCE_IMU_CALIBRATION_SAMPLES) != 0) {
+    if (phytium_bmi088_calibrate_gyro_serviced(
+            BALANCE_IMU_CALIBRATION_SAMPLES,
+            service,
+            context) != 0) {
         enter_fault(BALANCE_FAULT_IMU);
         return -1;
     }
@@ -309,6 +313,11 @@ int balance_control_enable(void)
     g_arm_tick = GenericTimerRead(GENERIC_TIMER_ID0);
     g_telemetry.state = BALANCE_STATE_ARMING;
     return 0;
+}
+
+int balance_control_enable(void)
+{
+    return balance_control_enable_serviced(NULL, NULL);
 }
 
 void balance_control_disable(void)
