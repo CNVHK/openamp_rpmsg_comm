@@ -37,6 +37,10 @@ static int16_t g_torque_test_peak_speed_rpm[2];
 static uint32_t g_motor_fault_code;
 static uint8_t g_motor_fault_id;
 static int8_t g_motor_fault_read_ret;
+static uint64_t g_active_gimbal_poll_interval_ticks;
+static uint64_t g_next_active_gimbal_poll_tick;
+
+#define ACTIVE_GIMBAL_POLL_HZ 20U
 
 typedef struct {
     uint8_t status;
@@ -897,6 +901,15 @@ int slave_app_init(void)
     int balance_ret = balance_control_init();
     int gimbal_ret = gimbal_control_init();
     int servo_ret = servo_motion_init();
+    uint64_t timer_frequency = GenericTimerFrequecy();
+
+    if (timer_frequency != 0U) {
+        g_active_gimbal_poll_interval_ticks =
+            timer_frequency / ACTIVE_GIMBAL_POLL_HZ;
+        g_next_active_gimbal_poll_tick =
+            GenericTimerRead(GENERIC_TIMER_ID0) +
+            g_active_gimbal_poll_interval_ticks;
+    }
 
     if (balance_ret != 0) {
         return balance_ret;
@@ -906,7 +919,35 @@ int slave_app_init(void)
 
 void slave_app_poll(void)
 {
+    const BalanceTelemetry *balance;
+    uint64_t now;
+
     balance_control_poll();
+
+    /*
+     * The balance loop is time-critical (100 Hz).  Keep the servo PWM motion
+     * controller paused while balancing, but continue polling the CAN gimbal
+     * at 20 Hz.  The gimbal refreshes its position command every 50 ms; fully
+     * skipping this poll makes motors 3/4 lose holding torque during a balance
+     * run even though a wheel fault only idles motors 1/2.
+     */
+    balance = balance_control_get_telemetry();
+    if (balance != NULL && balance->state == BALANCE_STATE_ACTIVE) {
+        now = GenericTimerRead(GENERIC_TIMER_ID0);
+        if (g_active_gimbal_poll_interval_ticks != 0U &&
+            (int64_t)(now - g_next_active_gimbal_poll_tick) >= 0) {
+            g_next_active_gimbal_poll_tick =
+                now + g_active_gimbal_poll_interval_ticks;
+            gimbal_control_poll();
+        }
+        return;
+    }
+
+    if (g_active_gimbal_poll_interval_ticks != 0U) {
+        g_next_active_gimbal_poll_tick =
+            GenericTimerRead(GENERIC_TIMER_ID0) +
+            g_active_gimbal_poll_interval_ticks;
+    }
     gimbal_control_poll();
     servo_motion_poll();
 }
