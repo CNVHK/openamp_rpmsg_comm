@@ -534,6 +534,7 @@ static size_t build_balance_telemetry_ack(uint8_t seq, uint8_t *out,
     payload[0] = BALANCE_TELEMETRY_VERSION;
     payload[1] = telemetry->state;
     payload[2] = telemetry->fault;
+    payload[3] = telemetry->position_hold_enabled;
     write_be_u16(&payload[4], telemetry->control_hz);
     write_be_u32(&payload[8], telemetry->loop_count);
     write_be_i32(&payload[12],
@@ -552,6 +553,14 @@ static size_t build_balance_telemetry_ack(uint8_t seq, uint8_t *out,
     write_be_u16(&payload[38], (uint16_t)right.current_x100_a);
     write_be_u16(&payload[40], (uint16_t)left.speed_rpm);
     write_be_u16(&payload[42], (uint16_t)right.speed_rpm);
+    write_be_i32(&payload[44],
+                 float_to_i32(telemetry->pitch_target_rad, 1000000.0f));
+    write_be_i32(&payload[48],
+                 float_to_i32(telemetry->position_target_m, 1000000.0f));
+    write_be_i32(&payload[52],
+                 float_to_i32(telemetry->position_error_m, 1000000.0f));
+    write_be_i32(&payload[56],
+                 float_to_i32(telemetry->velocity_error_m_s, 1000000.0f));
     return rpmsg_encode(CMD_BALANCE_TELEMETRY, seq, payload,
                         sizeof(payload), out, out_size);
 }

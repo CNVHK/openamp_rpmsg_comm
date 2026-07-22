@@ -181,6 +181,11 @@ static void enter_fault(uint8_t fault)
     g_telemetry.state = BALANCE_STATE_FAULT;
     g_telemetry.left_torque_nm = 0.0f;
     g_telemetry.right_torque_nm = 0.0f;
+    g_telemetry.pitch_target_rad = 0.0f;
+    g_telemetry.position_target_m = 0.0f;
+    g_telemetry.position_error_m = 0.0f;
+    g_telemetry.velocity_error_m_s = 0.0f;
+    g_telemetry.position_hold_enabled = g_position_hold.enabled;
     clear_motion_command();
     stop_motors(1U);
 }
@@ -304,6 +309,11 @@ int balance_control_enable_serviced(BalanceCalibrationService service,
     g_telemetry.wheel_velocity_m_s = 0.0f;
     g_telemetry.left_torque_nm = 0.0f;
     g_telemetry.right_torque_nm = 0.0f;
+    g_telemetry.pitch_target_rad = 0.0f;
+    g_telemetry.position_target_m = 0.0f;
+    g_telemetry.position_error_m = 0.0f;
+    g_telemetry.velocity_error_m_s = 0.0f;
+    g_telemetry.position_hold_enabled = g_position_hold.enabled;
     g_pitch_rate_filter_valid = 0U;
     clear_motion_command();
     g_motion.wheel_position_m = 0.0f;
@@ -347,6 +357,11 @@ void balance_control_disable(void)
     g_telemetry.fault = BALANCE_FAULT_NONE;
     g_telemetry.left_torque_nm = 0.0f;
     g_telemetry.right_torque_nm = 0.0f;
+    g_telemetry.pitch_target_rad = 0.0f;
+    g_telemetry.position_target_m = 0.0f;
+    g_telemetry.position_error_m = 0.0f;
+    g_telemetry.velocity_error_m_s = 0.0f;
+    g_telemetry.position_hold_enabled = g_position_hold.enabled;
     clear_motion_command();
 }
 
@@ -467,17 +482,24 @@ void balance_control_poll(void)
     wheel_velocity_m_s = 0.5f * g_lqr.config.wheel_radius_m *
         (g_lqr.config.left_motor_direction * sensor.left_velocity_rad_s +
          g_lqr.config.right_motor_direction * sensor.right_velocity_rad_s);
+    g_telemetry.position_target_m = g_position_target_m;
+    g_telemetry.position_error_m = wheel_position_m - g_position_target_m;
+    g_telemetry.velocity_error_m_s =
+        wheel_velocity_m_s - g_motion.applied_linear_m_s;
+    g_telemetry.position_hold_enabled = g_position_hold.enabled;
     if (g_position_hold.enabled) {
         pitch_target_rad = position_hold_pitch_target(
             &g_position_hold,
-            wheel_position_m - g_position_target_m,
-            wheel_velocity_m_s - g_motion.applied_linear_m_s);
+            g_telemetry.position_error_m,
+            g_telemetry.velocity_error_m_s);
         (void)lqr_set_targets(&g_lqr, pitch_target_rad, wheel_position_m,
                               wheel_velocity_m_s);
     } else {
+        pitch_target_rad = 0.0f;
         (void)lqr_set_targets(&g_lqr, 0.0f, g_position_target_m,
                               g_motion.applied_linear_m_s);
     }
+    g_telemetry.pitch_target_rad = pitch_target_rad;
     output = lqr_update(&g_lqr, &sensor);
     if (output.fault || !output.enabled) {
         enter_fault(BALANCE_FAULT_FALL);
@@ -615,6 +637,7 @@ int balance_control_reset_runtime_config(void)
     g_position_hold.pitch_limit_rad =
         BALANCE_DEFAULT_POSITION_HOLD_LIMIT_RAD;
     g_position_hold.enabled = 0U;
+    g_telemetry.position_hold_enabled = 0U;
     return BALANCE_CONFIG_OK;
 }
 
@@ -686,6 +709,7 @@ int balance_control_set_position_hold(uint8_t enabled, float kp_rad_per_m,
     }
     if (enabled == 0U) {
         g_position_hold.enabled = 0U;
+        g_telemetry.position_hold_enabled = 0U;
         return BALANCE_CONFIG_OK;
     }
     config.kp_rad_per_m = kp_rad_per_m;
@@ -700,6 +724,7 @@ int balance_control_set_position_hold(uint8_t enabled, float kp_rad_per_m,
         return BALANCE_CONFIG_INVALID;
     }
     g_position_hold = config;
+    g_telemetry.position_hold_enabled = 1U;
     return BALANCE_CONFIG_OK;
 }
 

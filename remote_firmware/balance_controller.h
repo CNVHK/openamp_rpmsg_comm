@@ -40,7 +40,12 @@ typedef struct {
     float wheel_velocity_m_s;
     float left_torque_nm;
     float right_torque_nm;
+    float pitch_target_rad;
+    float position_target_m;
+    float position_error_m;
+    float velocity_error_m_s;
     uint32_t loop_count;
+    uint8_t position_hold_enabled;
 } BalanceTelemetry;
 
 typedef struct {

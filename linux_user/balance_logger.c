@@ -18,7 +18,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define LOGGER_VERSION "1.0.0"
+#define LOGGER_VERSION "1.1.0"
 #define DEFAULT_DEVICE "/dev/rpmsg0"
 #define DEFAULT_LOG_DIR "logs/balance"
 #define DEFAULT_RATE_HZ 20U
@@ -39,6 +39,11 @@ typedef struct {
     int16_t right_current_x100;
     int16_t left_rpm;
     int16_t right_rpm;
+    int32_t pitch_target_x1e6;
+    int32_t position_target_x1e6;
+    int32_t position_error_x1e6;
+    int32_t velocity_error_x1e6;
+    uint8_t position_hold_enabled;
 } BalanceSample;
 
 static volatile sig_atomic_t g_stop;
@@ -108,8 +113,9 @@ static int decode_sample(const RpmsgFrame *reply, BalanceSample *sample)
     const uint8_t *p = reply->payload;
 
     if (reply->type != CMD_BALANCE_TELEMETRY ||
-        reply->length != BALANCE_TELEMETRY_PAYLOAD_SIZE ||
-        p[0] != BALANCE_TELEMETRY_VERSION) {
+        !((p[0] == 1U && reply->length == 44U) ||
+          (p[0] == BALANCE_TELEMETRY_VERSION &&
+           reply->length == BALANCE_TELEMETRY_PAYLOAD_SIZE))) {
         return -1;
     }
     memset(sample, 0, sizeof(*sample));
@@ -127,6 +133,13 @@ static int decode_sample(const RpmsgFrame *reply, BalanceSample *sample)
     sample->right_current_x100 = (int16_t)read_be_u16(&p[38]);
     sample->left_rpm = (int16_t)read_be_u16(&p[40]);
     sample->right_rpm = (int16_t)read_be_u16(&p[42]);
+    if (p[0] >= 2U && reply->length >= 60U) {
+        sample->position_hold_enabled = p[3];
+        sample->pitch_target_x1e6 = read_be_i32(&p[44]);
+        sample->position_target_x1e6 = read_be_i32(&p[48]);
+        sample->position_error_x1e6 = read_be_i32(&p[52]);
+        sample->velocity_error_x1e6 = read_be_i32(&p[56]);
+    }
     return 0;
 }
 
@@ -241,7 +254,8 @@ static FILE *open_hour_file(const char *directory, const char *run_id,
               "state_id,fault,control_hz,loop_count,pitch_rad,"
               "pitch_rate_rad_s,position_m,velocity_m_s,left_torque_nm,"
               "right_torque_nm,left_current_a,right_current_a,left_rpm,"
-              "right_rpm\n", file);
+              "right_rpm,position_hold_enabled,pitch_target_rad,"
+              "position_target_m,position_error_m,velocity_error_m_s\n", file);
     }
     return file;
 }
@@ -408,7 +422,8 @@ int main(int argc, char **argv)
         if (read_result == 0) {
             fprintf(file,
                     "%s,%lld,%llu,1,%lld,%s,%u,0x%02X,%u,%u,"
-                    "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.2f,%.2f,%d,%d\n",
+                    "%.6f,%.6f,%.6f,%.6f,%.6f,%.6f,%.2f,%.2f,%d,%d,"
+                    "%u,%.6f,%.6f,%.6f,%.6f\n",
                     timestamp, (long long)epoch_ms,
                     (unsigned long long)sample_index,
                     (long long)latency_us, state_name(sample.state),
@@ -421,7 +436,12 @@ int main(int argc, char **argv)
                     sample.right_torque_x1e6 / 1000000.0,
                     sample.left_current_x100 / 100.0,
                     sample.right_current_x100 / 100.0,
-                    sample.left_rpm, sample.right_rpm);
+                    sample.left_rpm, sample.right_rpm,
+                    sample.position_hold_enabled,
+                    sample.pitch_target_x1e6 / 1000000.0,
+                    sample.position_target_x1e6 / 1000000.0,
+                    sample.position_error_x1e6 / 1000000.0,
+                    sample.velocity_error_x1e6 / 1000000.0);
             success_count++;
             if (stop_on_fault && sample.state == 3U) {
                 printf("fault detected: 0x%02X\n", sample.fault);
@@ -430,7 +450,8 @@ int main(int argc, char **argv)
         } else {
             fprintf(file,
                     "%s,%lld,%llu,0,%lld,read_error,-1,unknown,0,0,"
-                    "nan,nan,nan,nan,nan,nan,nan,nan,nan,nan\n",
+                    "nan,nan,nan,nan,nan,nan,nan,nan,nan,nan,"
+                    "nan,nan,nan,nan,nan\n",
                     timestamp, (long long)epoch_ms,
                     (unsigned long long)sample_index,
                     (long long)latency_us);
@@ -447,10 +468,12 @@ int main(int argc, char **argv)
                    (unsigned long long)success_count,
                    (unsigned long long)error_count);
             if (read_result == 0) {
-                printf(" state=%s fault=0x%02X pitch=%.3f deg vel=%.3f m/s",
+                printf(" state=%s fault=0x%02X pitch=%.3f deg vel=%.3f m/s target=%.3f deg pos_err=%.3f m",
                        state_name(sample.state), sample.fault,
                        sample.pitch_x1e6 / 1000000.0 * 57.295779513,
-                       sample.velocity_x1e6 / 1000000.0);
+                       sample.velocity_x1e6 / 1000000.0,
+                       sample.pitch_target_x1e6 / 1000000.0 * 57.295779513,
+                       sample.position_error_x1e6 / 1000000.0);
             }
             putchar('\n');
             fflush(stdout);

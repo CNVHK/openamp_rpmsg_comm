@@ -81,7 +81,8 @@ static void test_balance_telemetry_frame(void)
     assert(rpmsg_decode(buffer, size, &frame));
     assert(frame.type == CMD_BALANCE_TELEMETRY);
     assert(frame.length == 0U);
-    assert(BALANCE_TELEMETRY_PAYLOAD_SIZE == 44U);
+    assert(BALANCE_TELEMETRY_VERSION == 2U);
+    assert(BALANCE_TELEMETRY_PAYLOAD_SIZE == 60U);
 }
 
 static void test_balance_runtime_tuning_frames(void)
